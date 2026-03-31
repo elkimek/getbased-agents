@@ -16,13 +16,18 @@ GATEWAY = os.environ.get("GETBASED_GATEWAY", "https://sync.getbased.health")
 async def _fetch_context() -> dict:
     if not TOKEN:
         return {"error": "GETBASED_TOKEN not set"}
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(
-            f"{GATEWAY}/api/context",
-            headers={"Authorization": f"Bearer {TOKEN}"},
-        )
-        r.raise_for_status()
-        return r.json()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{GATEWAY}/api/context",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as e:
+        return {"error": f"getbased gateway returned {e.response.status_code}"}
+    except httpx.RequestError as e:
+        return {"error": f"Failed to reach getbased gateway: {e}"}
 
 
 def _parse_sections(context: str) -> dict[str, str]:
