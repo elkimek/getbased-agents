@@ -198,6 +198,10 @@ That's expected — they're independent. Blood work tools talk to the sync gatew
 - **No mnemonic exposure**: the token is independent of your sync mnemonic
 - **No models in-process**: RAG queries go through the external server — no embedding models loaded in the MCP process
 
+## Related projects
+
+- **[getbased](https://github.com/elkimek/get-based)** — the health dashboard. This MCP reads the same lab context the in-app AI chat uses, and queries the same Knowledge Source endpoint configured in Settings → AI → Custom Knowledge Source. The [endpoint contract](https://github.com/elkimek/get-based/blob/main/docs/guide/interpretive-lens.md#for-developers-endpoint-contract) is shared — one server backs both the app and this MCP.
+
 ## License
 
 GPL-3.0
