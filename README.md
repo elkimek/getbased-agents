@@ -33,8 +33,11 @@ Your mnemonic never leaves your browser. The MCP server receives the same lab co
 | `getbased_lab_context` | Full lab summary with biomarkers, context cards, supplements, goals. Pass `profile` to target a specific profile. |
 | `getbased_section` | Get a specific section (e.g. hormones, lipids) or list all available sections |
 | `getbased_list_profiles` | List available profiles |
-| `knowledge_search` | Semantic search across your knowledge base (requires RAG server). Returns relevant passages with source attribution. |
-| `getbased_lens_config` | Show RAG endpoint config for getbased's Custom Knowledge Source |
+| `knowledge_search` | Semantic search across the active library on your knowledge base (requires RAG server). Returns relevant passages with source attribution. |
+| `knowledge_list_libraries` | List all knowledge base libraries and show which is active |
+| `knowledge_activate_library` | Switch the active library — subsequent searches target the new one until switched again |
+| `knowledge_stats` | Per-source chunk counts for the active library — useful for diagnosing missing results |
+| `getbased_lens_config` | Show RAG endpoint config for getbased's Knowledge Base (External server) |
 
 ### getbased_section
 
@@ -68,6 +71,21 @@ knowledge_search(query="MTHFR methylation folate", n_results=5)
 ```
 
 **Note:** This tool requires the RAG server to be running. Without it, all blood work tools still work — the MCP degrades gracefully.
+
+### Multi-library (v0.2+)
+
+The Lens server (0.2+ of `getbased-rag`) supports multiple libraries — keep research papers, clinical guides, and personal notes in separate collections and switch between them. `knowledge_search` always targets the currently active library.
+
+```
+# See what's available and which is active
+knowledge_list_libraries()
+
+# Switch. Subsequent knowledge_search calls hit this library until switched again
+knowledge_activate_library(library_id="<id-from-list>")
+
+# Confirm what's indexed in the active library
+knowledge_stats()
+```
 
 ## Multi-profile
 

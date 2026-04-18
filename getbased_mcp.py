@@ -24,10 +24,15 @@ mcp = FastMCP("getbased")
 TOKEN = os.environ.get("GETBASED_TOKEN", "")
 GATEWAY = os.environ.get("GETBASED_GATEWAY", "https://sync.getbased.health")
 
-LENS_URL = os.environ.get("LENS_URL", f"http://localhost:{os.environ.get('LENS_PORT', '8321')}")
+LENS_URL = os.environ.get("LENS_URL", f"http://localhost:{os.environ.get('LENS_PORT', '8322')}")
+# Default to getbased-rag's XDG data dir (its canonical key location). The
+# legacy ~/.hermes/rag/lens_api_key path is still honored when set explicitly
+# via LENS_API_KEY_FILE — Hermes users running their own rag engine override
+# this per their config.
+_DEFAULT_KEY_PATH = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
 LENS_API_KEY_FILE = os.environ.get(
     "LENS_API_KEY_FILE",
-    os.path.expanduser("~/.hermes/rag/lens_api_key"),
+    os.path.join(_DEFAULT_KEY_PATH, "getbased", "lens", "api_key"),
 )
 
 
@@ -97,6 +102,34 @@ async def _lens_request(query: str, top_k: int = 5) -> dict:
     except httpx.HTTPStatusError as e:
         # Note: response text may contain server-side details (stack traces, DB errors)
         # Acceptable for self-hosted trust model — operator owns both ends
+        return {"error": f"Lens returned {e.response.status_code}: {e.response.text}"}
+    except httpx.RequestError as e:
+        return {"error": f"Lens request failed: {e}"}
+    except (json.JSONDecodeError, ValueError) as e:
+        return {"error": f"Lens returned invalid JSON: {e}"}
+
+
+async def _lens_call(method: str, path: str, json_body: dict | None = None) -> dict:
+    """Generic authenticated call to the Lens server. Same error contract as
+    _lens_request — every failure mode returns {"error": "..."} so tool
+    callsites can uniformly forward errors to the MCP client without trying
+    to catch exceptions themselves."""
+    key = _read_lens_key()
+    if not key:
+        return {"error": "Lens API key not found. Start lens_server.py first."}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.request(
+                method,
+                f"{LENS_URL}{path}",
+                headers={"Authorization": f"Bearer {key}"},
+                json=json_body,
+            )
+            r.raise_for_status()
+            return r.json() if r.content else {}
+    except httpx.ConnectError:
+        return {"error": f"Lens server not reachable at {LENS_URL}. Is it running?"}
+    except httpx.HTTPStatusError as e:
         return {"error": f"Lens returned {e.response.status_code}: {e.response.text}"}
     except httpx.RequestError as e:
         return {"error": f"Lens request failed: {e}"}
@@ -196,6 +229,11 @@ async def knowledge_search(
 ) -> str:
     """Search the knowledge base for relevant passages using semantic similarity.
 
+    Searches the **currently active library** on the Lens server. If the user
+    has multiple libraries (research papers, clinical guides, personal notes),
+    list them with `knowledge_list_libraries` and switch with
+    `knowledge_activate_library` before searching.
+
     Returns passages from curated health and biology research, organized by
     series and claim type. Use this when the user asks about mechanisms,
     causal relationships, or prescriptive guidance related to health topics.
@@ -238,9 +276,9 @@ async def knowledge_search(
 
 @mcp.tool()
 async def getbased_lens_config() -> str:
-    """Get the Lens RAG endpoint configuration for getbased's Custom Knowledge Source.
+    """Get the Lens RAG endpoint configuration for getbased's Knowledge Base.
     Returns the URL, API key, and recommended top_k to paste into
-    Settings → AI → Custom Knowledge Source in getbased.
+    Settings → AI → Knowledge Base → External server in getbased.
 
     Note: Treat the response as sensitive — it contains the API key in plaintext."""
     key = _read_lens_key()
@@ -253,9 +291,75 @@ async def getbased_lens_config() -> str:
         f"Endpoint URL: {LENS_URL}/query\n"
         f"API key (Bearer token): {key}\n"
         f"Recommended top_k: 5\n\n"
-        "Paste these into getbased: Settings → AI → Custom Knowledge Source.\n"
+        "Paste these into getbased: Settings → AI → Knowledge Base → External server.\n"
         "For production (non-localhost), use HTTPS via a reverse proxy."
     )
+
+
+@mcp.tool()
+async def knowledge_list_libraries() -> str:
+    """List all knowledge base libraries on the Lens server, showing which is
+    active. Use this to discover what collections the user has (research
+    papers, clinical guides, personal notes, etc.) before searching or
+    switching between them."""
+    data = await _lens_call("GET", "/libraries")
+    if "error" in data:
+        return f"Knowledge libraries error: {data['error']}"
+    libs = data.get("libraries") or []
+    active = data.get("activeId", "")
+    if not libs:
+        return "No libraries found. Ingest at least one document to create the default library."
+    lines = ["Libraries:"]
+    for lib in libs:
+        lib_id = lib.get("id", "")
+        name = lib.get("name", "unnamed")
+        marker = "  (active)" if lib_id == active else ""
+        lines.append(f"  {lib_id}  {name}{marker}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def knowledge_activate_library(library_id: str) -> str:
+    """Switch the Lens server's active library. All subsequent
+    `knowledge_search` and `knowledge_stats` calls will target this library
+    until switched again. Use `knowledge_list_libraries` first to find the ID.
+
+    Args:
+        library_id: The library's ID (not its display name). Obtained from
+            knowledge_list_libraries.
+    """
+    if not library_id:
+        return "Error: library_id is required. Call knowledge_list_libraries to find one."
+    data = await _lens_call("POST", f"/libraries/{library_id}/activate")
+    if "error" in data:
+        return f"Activate library error: {data['error']}"
+    libs = data.get("libraries") or []
+    active = data.get("activeId", "")
+    for lib in libs:
+        if lib.get("id") == active:
+            return f"Active library is now: {lib.get('name', active)} ({active})"
+    return f"Active library is now: {active}"
+
+
+@mcp.tool()
+async def knowledge_stats() -> str:
+    """Get per-source chunk counts for the active knowledge base library.
+    Tells you which documents are indexed and how many excerpts each
+    contributes. Useful when diagnosing "I can't find X" — either the source
+    isn't indexed, or the relevant passages didn't score high enough."""
+    data = await _lens_call("GET", "/stats")
+    if "error" in data:
+        return f"Knowledge stats error: {data['error']}"
+    total = data.get("total_chunks", 0)
+    docs = data.get("documents") or []
+    if not docs:
+        return f"Active library is empty (total chunks: {total})."
+    lines = [f"Total chunks: {total}", "", "Sources:"]
+    for doc in docs:
+        src = doc.get("source", "unknown")
+        chunks = doc.get("chunks", 0)
+        lines.append(f"  {chunks:>6}  {src}")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
