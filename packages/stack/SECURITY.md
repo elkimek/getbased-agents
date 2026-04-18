@@ -2,8 +2,8 @@
 
 This meta-package ships **no runtime code of its own** beyond a thin CLI wrapper (`src/getbased_agent_stack/cli.py`). The actual trust surface lives in the two siblings:
 
-- [getbased-rag SECURITY.md](https://github.com/elkimek/getbased-rag/blob/main/SECURITY.md)
-- [getbased-mcp SECURITY.md](https://github.com/elkimek/getbased-mcp/blob/main/SECURITY.md)
+- [getbased-rag SECURITY.md](https://github.com/elkimek/getbased-agents/blob/main/packages/rag/SECURITY.md)
+- [getbased-mcp SECURITY.md](https://github.com/elkimek/getbased-agents/blob/main/packages/mcp/SECURITY.md)
 
 Report vulnerabilities affecting either sibling to that sibling's issue tracker (or email if the advisory is live).
 

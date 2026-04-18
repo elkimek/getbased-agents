@@ -3,7 +3,8 @@
 ## Dev setup
 
 ```bash
-git clone https://github.com/elkimek/getbased-mcp
+git clone https://github.com/elkimek/getbased-agents
+cd getbased-agents/packages/mcp
 cd getbased-mcp
 uv sync --extra test
 uv run pytest
@@ -16,7 +17,7 @@ Two layers:
 - **Unit tests** (`tests/test_tools.py`) — every tool exercised against mocked HTTP with `respx`. Fast, hermetic, ~2 s. Runs in CI on every push + PR.
 - **Smoke test** (`scripts/smoke.py`) — manual integration against a live Lens server + optional sync gateway. Uses real environment variables, exercises the real transport. Not in CI.
 
-The cross-repo integration test (MCP ↔ RAG ↔ sync gateway) lives in the [getbased-agent-stack](https://github.com/elkimek/getbased-agent-stack) meta-package — running `uv run pytest` there starts a real `lens serve` subprocess and calls every MCP tool against it.
+The cross-repo integration test (MCP ↔ RAG ↔ sync gateway) lives in the [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack) meta-package — running `uv run pytest` there starts a real `lens serve` subprocess and calls every MCP tool against it.
 
 Every new tool should get:
 1. A unit test in `tests/test_tools.py` (happy path + at least one error path)
@@ -32,7 +33,7 @@ Every new tool should get:
    git tag -a v0.X.0 -m "v0.X.0 — summary"
    git push origin v0.X.0
    ```
-5. Bump the matching pin in [getbased-agent-stack](https://github.com/elkimek/getbased-agent-stack)'s `pyproject.toml` so the meta-package pulls the new MCP
+5. Bump the matching pin in [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack)'s `pyproject.toml` so the meta-package pulls the new MCP
 
 ## Protocol compatibility
 

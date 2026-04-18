@@ -9,10 +9,8 @@ description = "One-command install of the full getbased agent stack — getbased
 readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.10"
-# Pulls both sibling packages. Pin to the same release family so the
-# protocol versions stay in sync; bump this meta when you cut a new
-# coordinated release. Not on PyPI yet — sourced from git tags via
-# [tool.uv.sources] below.
+# Pulls both sibling packages. Bump this meta when a sibling protocol
+# bump requires coordinated release.
 dependencies = [
     "getbased-mcp>=0.2.0",
     "getbased-rag>=0.1.0",
@@ -24,14 +22,9 @@ full = ["getbased-rag[full]>=0.1.0"]
 # For contributors running the integration test harness.
 test = ["pytest>=8.0", "httpx>=0.27", "pytest-timeout>=2.3"]
 
-# uv-specific: resolve sibling packages directly from GitHub until they
-# land on PyPI. `tool.uv.sources` is ignored by pip and by PEP 621-only
-# tools; it only affects `uv sync` / `uv pip install` / `uv run`. A
-# `pipx install getbased-agent-stack` from PyPI (once published) will
-# use the normal `dependencies` block.
-[tool.uv.sources]
-getbased-mcp = { git = "https://github.com/elkimek/getbased-mcp", rev = "main" }
-getbased-rag = { git = "https://github.com/elkimek/getbased-rag", rev = "main" }
+# In the monorepo (elkimek/getbased-agents), the workspace-root pyproject
+# overrides these with `workspace = true` sources. From PyPI, the
+# normal `dependencies` block above resolves remotely as expected.
 
 [project.scripts]
 # Convenience launcher. Delegates to the real lens CLI so users don't

@@ -36,5 +36,5 @@ Email the maintainer at `claude.l8hw3@simplelogin.com` with subject `[getbased-m
 
 ## Related
 
-- [getbased-rag SECURITY.md](https://github.com/elkimek/getbased-rag/blob/main/SECURITY.md) — the RAG backend's threat model
+- [getbased-rag SECURITY.md](https://github.com/elkimek/getbased-agents/blob/main/packages/rag/SECURITY.md) — the RAG backend's threat model
 - [getbased Settings → Data → Agent Access](https://app.getbased.health) — where the read-only token lives

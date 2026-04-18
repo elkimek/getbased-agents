@@ -2,15 +2,16 @@
 
 This repo is a thin meta-package — most of the interesting code lives in the two siblings:
 
-- [getbased-mcp](https://github.com/elkimek/getbased-mcp) — the MCP adapter (stdio protocol ↔ HTTP)
-- [getbased-rag](https://github.com/elkimek/getbased-rag) — the RAG backend (FastAPI + Qdrant + embedders)
+- [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp) — the MCP adapter (stdio protocol ↔ HTTP)
+- [getbased-rag](https://github.com/elkimek/getbased-agents/tree/main/packages/rag) — the RAG backend (FastAPI + Qdrant + embedders)
 
 If the bug is in a tool definition or an HTTP endpoint, contribute there. This repo's job is coordinating versions, shipping example configs, and catching cross-repo protocol drift.
 
 ## Dev setup
 
 ```bash
-git clone https://github.com/elkimek/getbased-agent-stack
+git clone https://github.com/elkimek/getbased-agents
+cd getbased-agents/packages/stack
 cd getbased-agent-stack
 uv sync --extra test --extra full
 uv run pytest

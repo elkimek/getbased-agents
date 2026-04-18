@@ -3,7 +3,8 @@
 ## Dev setup
 
 ```bash
-git clone https://github.com/elkimek/getbased-rag
+git clone https://github.com/elkimek/getbased-agents
+cd getbased-agents/packages/rag
 cd getbased-rag
 uv sync --extra test --extra full
 uv run pytest
@@ -25,7 +26,7 @@ uv run pytest
 
 Runs in ~2 s on CI across Python 3.10/3.11/3.12.
 
-The cross-repo integration test (real `lens serve` subprocess + MCP tool calls against it) lives in the [getbased-agent-stack](https://github.com/elkimek/getbased-agent-stack) meta-package.
+The cross-repo integration test (real `lens serve` subprocess + MCP tool calls against it) lives in the [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack) meta-package.
 
 Every new HTTP endpoint should get a unit test covering the happy path, the auth-failure path, and at least one error path (404, 400, or 500).
 
@@ -46,7 +47,7 @@ Every new HTTP endpoint should get a unit test covering the happy path, the auth
    git tag -a v0.X.0 -m "v0.X.0 — summary"
    git push origin v0.X.0
    ```
-5. Bump the matching pin in [getbased-agent-stack](https://github.com/elkimek/getbased-agent-stack)'s `pyproject.toml`
+5. Bump the matching pin in [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack)'s `pyproject.toml`
 6. If the HTTP protocol changed incompatibly, also bump `getbased-mcp` and the PWA's Knowledge Base external-server client
 
 ## Protocol compatibility
@@ -54,7 +55,7 @@ Every new HTTP endpoint should get a unit test covering the happy path, the auth
 The `/query`, `/stats`, `/libraries` contracts are shared with:
 
 - The getbased PWA's "External server" Knowledge Base backend (see `docs/guide/interpretive-lens.md` in the main repo)
-- [getbased-mcp](https://github.com/elkimek/getbased-mcp)'s `knowledge_*` tools
+- [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp)'s `knowledge_*` tools
 
 When changing request/response shapes, bump the `version` field in the request model and keep the old path supported for at least one release cycle so clients can migrate.
 

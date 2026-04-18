@@ -1,119 +1,83 @@
-# getbased-agent-stack
+# getbased-agents
 
-One-command install of the full getbased agent stack: an MCP server that exposes your lab data and a local RAG knowledge server that grounds the AI in documents you trust.
+Monorepo for the [getbased](https://getbased.health) agent ecosystem — MCP server, RAG backend, and a meta-package that wires them together.
 
-## What's in the box
-
-| Component | Role | Upstream |
-|---|---|---|
-| [`getbased-mcp`](https://github.com/elkimek/getbased-mcp) | MCP adapter — translates tool calls from Claude Code / Hermes / OpenClaw / any MCP client into HTTP requests | stdio |
-| [`getbased-rag`](https://github.com/elkimek/getbased-rag) | Local RAG engine — FastAPI + Qdrant + MiniLM. Also the backend for the getbased PWA's "External server" Knowledge Base | HTTP, port 8322 |
+| Package | PyPI | Role | Contents |
+|---|---|---|---|
+| [`getbased-mcp`](packages/mcp/) | `getbased-mcp` | MCP adapter for Claude Code / Hermes / OpenClaw / any MCP client | stdio ↔ HTTP |
+| [`getbased-rag`](packages/rag/) | `getbased-rag` | Local RAG knowledge server. Also the PWA's "External server" Knowledge Base backend | FastAPI + Qdrant + MiniLM/BGE |
+| [`getbased-agent-stack`](packages/stack/) | `getbased-agent-stack` | Meta-package pinning the two siblings | thin CLI + systemd unit + example configs |
 
 ```
 Claude Code / Hermes / OpenClaw
         │ MCP (stdio)
         ▼
-  getbased-mcp   ◀── this meta-package installs both
+  getbased-mcp
    │        │
    │ HTTP   │ HTTP
    ▼        ▼
 sync GW   getbased-rag
-          on localhost:8322
+          (localhost:8322)
 ```
 
-The MCP is lightweight (~10 MB). The RAG engine pulls in `sentence-transformers` + `qdrant-client` + optional ONNX Runtime for GPU acceleration (~500 MB). The `[full]` extra pulls the RAG's full parser stack (PDF, DOCX, ZIP) + ONNX so you can serve the same endpoint the PWA's External-server backend uses.
-
 ## Install
+
+Most users: **one command** via the meta-package:
 
 ```bash
 pipx install "getbased-agent-stack[full]"
 ```
 
-Installs both sibling packages at version-compatible pins, plus the `getbased-stack` discovery wrapper. After install the two binaries are on your PATH:
+Or pick the piece you actually need:
 
-- `lens` — RAG server CLI (`serve`, `ingest`, `stats`, `key`, ...)
-- `getbased-mcp` — stdio MCP server (spawned on demand by agent clients)
+```bash
+pipx install getbased-mcp            # agents for lab data only, no RAG  (~10 MB)
+pipx install "getbased-rag[full]"    # RAG backend for the PWA, no agents (~500 MB)
+```
 
 ## Quickstart
 
-### 1. Start the RAG server
-
-```bash
-lens key                              # prints the bearer token, generates on first call
-lens serve                            # blocks; runs on 127.0.0.1:8322
-lens ingest /path/to/papers           # in another shell — indexes your docs
-```
-
-Or run it as a systemd user service (see `systemd/getbased-rag.service`):
-
-```bash
-mkdir -p ~/.config/systemd/user/
-cp $(python -c 'import getbased_agent_stack, pathlib; print(pathlib.Path(getbased_agent_stack.__file__).parent.parent.parent / "systemd" / "getbased-rag.service")') ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now getbased-rag
-```
-
-### 2. Wire the MCP into your agent
-
-**Claude Code** — add to `~/.claude/mcp.json` (see `examples/claude-code-mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "getbased": {
-      "command": "getbased-mcp",
-      "env": {
-        "GETBASED_TOKEN": "your-read-only-token",
-        "LENS_URL": "http://localhost:8322"
-      }
-    }
-  }
-}
-```
-
-**Hermes** — add to `~/.hermes/config.yaml` (see `examples/hermes-mcp.yaml`):
-
-```yaml
-mcp_servers:
-  getbased:
-    command: getbased-mcp
-    env:
-      GETBASED_TOKEN: "your-read-only-token"
-      LENS_URL: "http://localhost:8322"
-```
-
-Get the `GETBASED_TOKEN` from getbased PWA → **Settings → Data → Agent Access**.
-
-### 3. Also wire RAG into the PWA (optional)
-
-The same RAG server can feed the getbased PWA's Knowledge Base. In the app, go to **Settings → AI → Knowledge Base → External server** and paste:
-
-| Field | Value |
-|---|---|
-| URL | `http://127.0.0.1:8322` |
-| API key | output of `lens key` |
-
-Now the PWA's chat and the MCP agents all ground answers in the same library.
-
-## Version compatibility
-
-| Stack | mcp | rag | Protocol |
-|---|---|---|---|
-| 0.1.x | ≥0.2.0 | ≥0.1.0 | v1 (with multi-library) |
-
-Bump the meta-package major when the sibling protocol breaks compatibility. For normal improvements, bump siblings freely — the meta just tracks their `>=` pins.
+See [`packages/stack/README.md`](packages/stack/README.md) — walks through starting the RAG server, wiring the MCP into Claude Code and Hermes, and pointing the PWA at the same backend.
 
 ## Development
 
 ```bash
-git clone https://github.com/elkimek/getbased-agent-stack
-cd getbased-agent-stack
-uv sync --extra test --extra full
-uv run pytest                         # runs the integration test against a real lens server
+git clone https://github.com/elkimek/getbased-agents
+cd getbased-agents
+uv sync --all-packages --all-extras
 ```
 
-The integration suite starts `lens serve` in a subprocess, ingests a fixture document, and exercises every MCP tool end-to-end. Catches protocol drift between the siblings (the kind of bug where "MCP v0.1 can't talk to RAG v1.21's multi-library endpoints" would otherwise slip through).
+Each package runs its own tests from its own directory:
+
+```bash
+(cd packages/mcp && uv run pytest)     # 22 unit tests, respx-mocked HTTP
+(cd packages/rag && uv run pytest)     # 26 tests, FastAPI TestClient + fake embedder
+(cd packages/stack && uv run pytest)   # 2 integration tests: real lens subprocess + real MCP tool calls
+```
+
+CI runs the same matrix on Python 3.10/3.11/3.12 (unit) + 3.12 (integration) on every push and PR.
+
+Per-package details:
+- [packages/mcp/README.md](packages/mcp/README.md) + [CONTRIBUTING](packages/mcp/CONTRIBUTING.md) + [SECURITY](packages/mcp/SECURITY.md)
+- [packages/rag/README.md](packages/rag/README.md) + [CONTRIBUTING](packages/rag/CONTRIBUTING.md) + [SECURITY](packages/rag/SECURITY.md)
+- [packages/stack/README.md](packages/stack/README.md) + [CONTRIBUTING](packages/stack/CONTRIBUTING.md) + [SECURITY](packages/stack/SECURITY.md)
+
+## Releases
+
+Packages release independently — they have their own PyPI entries, their own version numbers, their own tags. Release process per package is documented in its `CONTRIBUTING.md`.
+
+The meta-package (`getbased-agent-stack`) bumps only when a sibling protocol change requires coordinated install. See [packages/stack/CONTRIBUTING.md](packages/stack/CONTRIBUTING.md#when-to-bump-this-repo).
+
+## Repo history
+
+This repo was formed by merging three previously-separate repos. History is preserved via `git subtree add`:
+
+- `elkimek/getbased-mcp` → `packages/mcp/` (archived)
+- `elkimek/getbased-rag` → `packages/rag/` (archived)
+- `elkimek/getbased-agent-stack` → `packages/stack/` + root scaffolding (renamed to this repo)
+
+PyPI package names stay the same — the merge is repo-layout only.
 
 ## Licence
 
-GPL-3.0-only, matching the sibling packages.
+GPL-3.0-only, consistent across all three packages.

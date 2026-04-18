@@ -1,6 +1,6 @@
 [Unit]
 Description=getbased-rag (local RAG knowledge server)
-Documentation=https://github.com/elkimek/getbased-rag
+Documentation=https://github.com/elkimek/getbased-agents/tree/main/packages/rag
 After=network.target
 
 [Service]

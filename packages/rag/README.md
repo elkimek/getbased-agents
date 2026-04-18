@@ -1,6 +1,6 @@
 # getbased-rag
 
-> **Installing for the first time?** The [getbased-agent-stack](https://github.com/elkimek/getbased-agent-stack) meta-package bundles this server with the MCP that Claude Code / Hermes / OpenClaw talk to, plus an example systemd unit. One command and you're up.
+> **Installing for the first time?** The [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack) meta-package bundles this server with the MCP that Claude Code / Hermes / OpenClaw talk to, plus an example systemd unit. One command and you're up.
 
 A standalone RAG knowledge server — the backend that used to ship inside the getbased Electron desktop app, now just Python. Point any client (the getbased PWA's *External server* lens backend, or your own) at it.
 
@@ -16,13 +16,13 @@ A standalone RAG knowledge server — the backend that used to ship inside the g
 Requires Python ≥ 3.10.
 
 ```bash
-pipx install "git+https://github.com/elkimek/getbased-rag.git[full]"
+pipx install "git+https://github.com/elkimek/getbased-agents/tree/main/packages/rag.git[full]"
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/elkimek/getbased-rag.git
+git clone https://github.com/elkimek/getbased-agents/tree/main/packages/rag.git
 cd getbased-rag
 python3 -m venv .venv
 source .venv/bin/activate
@@ -74,7 +74,7 @@ Click **Save**, then **Test connection**. `rag_ready: false` is expected before 
 
 ### Agent access (Claude Code, Hermes, OpenClaw, etc.)
 
-Pair this server with [getbased-mcp](https://github.com/elkimek/getbased-mcp) to expose `knowledge_search`, `knowledge_list_libraries`, `knowledge_activate_library`, and `knowledge_stats` as MCP tools. Any MCP-compatible client — Claude Code, Hermes Agent, OpenClaw — can then search your ingested library over any transport the client supports (stdio, SSE, websocket). Typical setup: run both the lens server and getbased-mcp on the same VM, point MCP's `LENS_URL` at `http://localhost:8322`.
+Pair this server with [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp) to expose `knowledge_search`, `knowledge_list_libraries`, `knowledge_activate_library`, and `knowledge_stats` as MCP tools. Any MCP-compatible client — Claude Code, Hermes Agent, OpenClaw — can then search your ingested library over any transport the client supports (stdio, SSE, websocket). Typical setup: run both the lens server and getbased-mcp on the same VM, point MCP's `LENS_URL` at `http://localhost:8322`.
 
 ---
 

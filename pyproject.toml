@@ -1,0 +1,20 @@
+# Monorepo root — not a package itself, just a uv workspace coordinator.
+# Each package under packages/ is an independently releasable PyPI project
+# with its own pyproject.toml. Run `uv sync` at the root to install every
+# package in editable mode + their dev deps.
+#
+# Published packages:
+#   packages/mcp   → getbased-mcp (PyPI)
+#   packages/rag   → getbased-rag (PyPI)
+#   packages/stack → getbased-agent-stack (PyPI; meta that pins the two)
+
+[tool.uv.workspace]
+members = ["packages/mcp", "packages/rag", "packages/stack"]
+
+# Cross-package dep resolution: in the workspace, "getbased-mcp" and
+# "getbased-rag" point at the sibling packages, not the PyPI releases.
+# Lets `pytest` in packages/stack use the local copies of mcp + rag
+# instead of rebuilding them from remote git.
+[tool.uv.sources]
+getbased-mcp = { workspace = true }
+getbased-rag = { workspace = true }

@@ -7,3 +7,4 @@ build/
 .python-version
 tests/fixtures/
 .pytest_cache/
+*.egg-info/
