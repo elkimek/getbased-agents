@@ -70,6 +70,10 @@ In the PWA: **Settings → AI → Knowledge Base → External server**
 
 Click **Save**, then **Test connection**. `rag_ready: false` is expected before you ingest anything.
 
+### Agent access (Claude Code, Hermes, OpenClaw, etc.)
+
+Pair this server with [getbased-mcp](https://github.com/elkimek/getbased-mcp) to expose `knowledge_search`, `knowledge_list_libraries`, `knowledge_activate_library`, and `knowledge_stats` as MCP tools. Any MCP-compatible client — Claude Code, Hermes Agent, OpenClaw — can then search your ingested library over any transport the client supports (stdio, SSE, websocket). Typical setup: run both the lens server and getbased-mcp on the same VM, point MCP's `LENS_URL` at `http://localhost:8322`.
+
 ---
 
 ## Configuration

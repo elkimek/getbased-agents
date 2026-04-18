@@ -99,6 +99,11 @@ class Store:
 
         Uses query_points (qdrant-client 1.10+); falls back to deprecated search()
         for older clients so we work across version bumps.
+
+        An empty library that was never ingested into has no Qdrant collection
+        yet — we treat that as "no results" rather than 500'ing. Matches what
+        a user would expect: query a fresh library, get an empty chunks list,
+        ingest something, query again, get results.
         """
         try:
             # New API
@@ -118,6 +123,10 @@ class Store:
                 limit=top_k,
                 score_threshold=score_threshold,
             )
+        except ValueError as e:
+            if "not found" in str(e).lower():
+                return []
+            raise
         out = []
         for r in points:
             payload = r.payload or {}
