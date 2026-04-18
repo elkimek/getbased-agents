@@ -1,0 +1,208 @@
+"""Document ingestion — read files from disk, chunk, embed, store."""
+
+from __future__ import annotations
+
+import logging
+import tempfile
+import zipfile
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator
+from uuid import uuid4
+
+from .config import LensConfig
+from .embedder import create_embedder
+from .registry import Registry
+from .store import QdrantBackend, Store, chunk_text
+
+log = logging.getLogger("lens.ingest")
+
+# File loaders — heavy deps are imported lazily so the lens core doesn't pull them
+SUPPORTED_EXTS = {".txt", ".md", ".markdown", ".rst", ".json", ".pdf", ".docx"}
+
+
+@contextmanager
+def _expand_zip_if_needed(source: Path):
+    """Yield the real path to walk. If `source` is a .zip, extract to a
+    temp dir and yield that; cleanup happens when the context closes.
+    Otherwise yield `source` unchanged. Rejects absolute paths and ".."
+    components inside the archive to prevent zip-slip writes outside tmp.
+    """
+    if not (source.is_file() and source.suffix.lower() == ".zip"):
+        yield source
+        return
+
+    with tempfile.TemporaryDirectory(prefix="lens-zip-") as tmp:
+        tmp_path = Path(tmp).resolve()
+        with zipfile.ZipFile(source) as zf:
+            for member in zf.namelist():
+                # zip-slip guard. Path.is_relative_to catches both absolute
+                # and parent-walking entries without the prefix-match off-by-one
+                # that str.startswith has (e.g. /tmp/lens-zip-abc would match
+                # /tmp/lens-zip-abc-evil/x under naive prefix matching).
+                target = (tmp_path / member).resolve()
+                try:
+                    target.relative_to(tmp_path)
+                except ValueError:
+                    raise RuntimeError(f"Unsafe zip entry: {member}")
+            zf.extractall(tmp_path)
+        log.info("Extracted zip %s into %s", source.name, tmp_path)
+        yield tmp_path
+
+
+MAX_FILE_BYTES = 100 * 1024 * 1024  # 100 MB — a research PDF fits; zip bombs don't
+
+
+def _read_text(path: Path) -> str:
+    # Cap per-file size before any parser runs. Caller's try/except treats
+    # RuntimeError as "skip this file, continue with the rest", so an
+    # oversized outlier can't take down the whole batch.
+    size = path.stat().st_size
+    if size > MAX_FILE_BYTES:
+        raise RuntimeError(f"File exceeds {MAX_FILE_BYTES // (1024 * 1024)} MB cap ({size} bytes)")
+
+    suffix = path.suffix.lower()
+    if suffix in (".txt", ".md", ".markdown", ".rst", ".json"):
+        return path.read_text(encoding="utf-8", errors="replace")
+    if suffix == ".pdf":
+        try:
+            from PyPDF2 import PdfReader  # type: ignore
+        except ImportError:
+            raise RuntimeError(
+                "PDF ingest requires PyPDF2. Install lens with: pip install 'getbased-lens[pdf]'"
+            )
+        reader = PdfReader(str(path))
+        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+    if suffix == ".docx":
+        try:
+            import docx  # type: ignore
+        except ImportError:
+            raise RuntimeError(
+                "DOCX ingest requires python-docx. Install lens with: pip install 'getbased-lens[docx]'"
+            )
+        doc = docx.Document(str(path))
+        return "\n\n".join(p.text for p in doc.paragraphs)
+    raise RuntimeError(f"Unsupported file type: {suffix}")
+
+
+def _walk(root: Path) -> Iterator[Path]:
+    if root.is_file():
+        yield root
+        return
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
+            yield p
+
+
+def ingest_path(config: LensConfig, source: Path, emit_progress: bool = False) -> dict:
+    """Ingest a file or directory into the lens store. Returns summary stats.
+    A .zip input is auto-extracted into a temp directory and ingested as if
+    the user had passed that directory; the temp dir is removed on exit.
+
+    When `emit_progress` is True, prints JSONL progress events to stdout
+    before the final result line. Events: {"event":"start","total":N},
+    {"event":"file","index":i,"total":N,"source":"...","chunks":n}. The
+    final line is the result dict (no "event" key) so Rust can route
+    JSONL lines to progress state vs result capture.
+    """
+    if not source.exists():
+        raise FileNotFoundError(f"No such path: {source}")
+
+    with _expand_zip_if_needed(source) as walk_root:
+        return _ingest_walk(config, walk_root, emit_progress=emit_progress)
+
+
+def _ingest_walk(config: LensConfig, source: Path, emit_progress: bool = False) -> dict:
+    import json as _json
+    import sys as _sys
+
+    def _emit(**event):
+        if not emit_progress:
+            return
+        print(_json.dumps(event), flush=True)
+        # Also echo to stderr so a human watching the CLI can see activity
+        # if they ever run `lens ingest --json` manually.
+        print(_json.dumps(event), file=_sys.stderr, flush=True)
+
+    embedder = create_embedder(config)
+    # Ingest always targets the ACTIVE library. Bootstrap a default library
+    # if none exists — mirrors the browser-local lens semantics.
+    registry = Registry(config)
+    registry.ensure_default()
+    backend = QdrantBackend(config)
+    store = Store(config, collection=registry.active_collection(), backend=backend)
+    store.ensure_collection(embedder.dimension())
+
+    # Pre-walk to get a total count for progress. Cheap — just scans filenames,
+    # no file reads. Worth the extra walk for the UX win of a real N/M bar.
+    all_files = list(_walk(source))
+    total = len(all_files)
+    _emit(event="start", total=total)
+
+    # Source-level dedup: re-ingesting the same file would otherwise create
+    # a parallel set of chunks (each gets a fresh uuid4 below). Preempt by
+    # deleting any existing chunks for each source we're about to re-index.
+    # Cheap relative to embedding cost — qdrant filter-delete by payload.
+    for file_path in all_files:
+        rel = str(file_path.relative_to(source.parent if source.is_file() else source))
+        try:
+            store.delete_by_source(rel)
+        except Exception as e:
+            log.debug("Pre-ingest dedup delete failed for %s (likely first ingest): %s", rel, e)
+
+    files_seen = 0
+    chunks_indexed = 0
+    skipped = []
+
+    BATCH = 32
+    batch: list[dict] = []
+
+    def flush(batch: list[dict]) -> int:
+        if not batch:
+            return 0
+        texts = [b["text"] for b in batch]
+        vectors = embedder.encode(texts)
+        for b, v in zip(batch, vectors):
+            b["vector"] = v
+        store.upsert(batch)
+        return len(batch)
+
+    for file_path in all_files:
+        files_seen += 1
+        file_chunks_before = chunks_indexed + len(batch)
+        try:
+            text = _read_text(file_path)
+        except Exception as e:
+            log.warning("Skipping %s: %s", file_path, e)
+            skipped.append(str(file_path))
+            _emit(event="file", index=files_seen, total=total,
+                  source=str(file_path), chunks=0, skipped=True)
+            continue
+        if not text.strip():
+            _emit(event="file", index=files_seen, total=total,
+                  source=str(file_path), chunks=0, skipped=True)
+            continue
+        rel_source = str(file_path.relative_to(source.parent if source.is_file() else source))
+        for chunk in chunk_text(text, max_size=config.chunk_max_size,
+                                overlap=config.chunk_overlap, min_size=config.chunk_min_size):
+            batch.append({
+                "id": str(uuid4()),
+                "text": chunk,
+                "source": rel_source,
+            })
+            if len(batch) >= BATCH:
+                chunks_indexed += flush(batch)
+                batch = []
+        # Emit per-file progress. Chunks-added is approximate until the
+        # final batch flushes, but close enough for a progress indicator.
+        file_chunks = chunks_indexed + len(batch) - file_chunks_before
+        _emit(event="file", index=files_seen, total=total,
+              source=rel_source, chunks=file_chunks)
+
+    chunks_indexed += flush(batch)
+
+    return {
+        "files_seen": files_seen,
+        "chunks_indexed": chunks_indexed,
+        "skipped": skipped,
+    }
