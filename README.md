@@ -2,6 +2,8 @@
 
 An [MCP](https://modelcontextprotocol.io) server that exposes blood work data and an optional RAG knowledge base from [getbased](https://getbased.health) as tools. Works with any MCP-compatible client (Claude Code, Hermes, Claude Desktop, etc.).
 
+> **Installing for the first time?** The [getbased-agent-stack](https://github.com/elkimek/getbased-agent-stack) meta-package bundles this MCP with the RAG engine it talks to, plus example configs for Claude Code and Hermes. One command and you're up.
+
 ## How it works
 
 ```
