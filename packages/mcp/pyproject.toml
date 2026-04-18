@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "getbased-mcp"
 version = "0.2.0"
@@ -15,6 +19,10 @@ test = ["pytest>=8.0", "pytest-asyncio>=0.23", "respx>=0.21"]
 
 [project.scripts]
 getbased-mcp = "getbased_mcp:mcp.run"
+
+# Single-file module — tell setuptools to pick it up as a flat module.
+[tool.setuptools]
+py-modules = ["getbased_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
