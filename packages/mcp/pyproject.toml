@@ -1,0 +1,22 @@
+[project]
+name = "getbased-mcp"
+version = "0.2.0"
+description = "MCP server for querying blood work data and knowledge base from getbased"
+readme = "README.md"
+license = "GPL-3.0-only"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-asyncio>=0.23", "respx>=0.21"]
+
+[project.scripts]
+getbased-mcp = "getbased_mcp:mcp.run"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+asyncio_mode = "auto"
