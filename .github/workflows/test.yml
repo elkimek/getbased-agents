@@ -1,10 +1,11 @@
 name: Tests
 
+# Currently manual-dispatch only — the integration test pulls
+# getbased-rag from GitHub, and that repo is private today. Once rag is
+# public (or a SIBLING_REPO_PAT secret is configured for the stack repo),
+# flip the triggers back to `push` + `pull_request`.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   integration:
