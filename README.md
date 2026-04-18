@@ -1,5 +1,7 @@
 # getbased-rag
 
+> **Installing for the first time?** The [getbased-agent-stack](https://github.com/elkimek/getbased-agent-stack) meta-package bundles this server with the MCP that Claude Code / Hermes / OpenClaw talk to, plus an example systemd unit. One command and you're up.
+
 A standalone RAG knowledge server — the backend that used to ship inside the getbased Electron desktop app, now just Python. Point any client (the getbased PWA's *External server* lens backend, or your own) at it.
 
 - **Stack**: FastAPI + Uvicorn · Qdrant (embedded local mode) · sentence-transformers / ONNX Runtime

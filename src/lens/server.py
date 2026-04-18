@@ -19,6 +19,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -188,7 +189,10 @@ def create_app(config: LensConfig) -> FastAPI:
         if not authorization.startswith("Bearer "):
             raise HTTPException(401, "Authorization must be Bearer scheme")
         token = authorization.removeprefix("Bearer ").strip()
-        if token != api_key:
+        # Constant-time comparison — the server is typically on localhost so
+        # this is defensive rather than load-bearing, but secrets.compare_digest
+        # costs nothing and rules out the class of bug entirely.
+        if not secrets.compare_digest(token, api_key):
             raise HTTPException(401, "Invalid API key")
 
     @app.get("/")
