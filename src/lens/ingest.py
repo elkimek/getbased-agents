@@ -50,7 +50,17 @@ def _expand_zip_if_needed(source: Path):
         yield tmp_path
 
 
+MAX_FILE_BYTES = 100 * 1024 * 1024  # 100 MB — a research PDF fits; zip bombs don't
+
+
 def _read_text(path: Path) -> str:
+    # Cap per-file size before any parser runs. Caller's try/except treats
+    # RuntimeError as "skip this file, continue with the rest", so an
+    # oversized outlier can't take down the whole batch.
+    size = path.stat().st_size
+    if size > MAX_FILE_BYTES:
+        raise RuntimeError(f"File exceeds {MAX_FILE_BYTES // (1024 * 1024)} MB cap ({size} bytes)")
+
     suffix = path.suffix.lower()
     if suffix in (".txt", ".md", ".markdown", ".rst", ".json"):
         return path.read_text(encoding="utf-8", errors="replace")

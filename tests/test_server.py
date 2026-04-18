@@ -294,6 +294,21 @@ def test_cors_blocks_random_origin(client: TestClient) -> None:
     assert r.headers.get("access-control-allow-origin") != "https://evil.example"
 
 
+def test_ingest_file_size_cap(tmp_path) -> None:
+    """Files over MAX_FILE_BYTES should be rejected before any parser runs —
+    caps the attack surface of oversized PDFs or docx zip bombs."""
+    from lens.ingest import _read_text, MAX_FILE_BYTES
+
+    big = tmp_path / "huge.txt"
+    # Write just over the cap (sparse-file, so no real disk use)
+    with big.open("wb") as f:
+        f.seek(MAX_FILE_BYTES + 1)
+        f.write(b"\0")
+    import pytest as _pytest
+    with _pytest.raises(RuntimeError, match="exceeds"):
+        _read_text(big)
+
+
 def test_500_errors_dont_leak_exception_details(client: TestClient, auth: dict, monkeypatch) -> None:
     """Verify the 500-response sanitisation — a forced internal error should
     surface a generic message, not the raw traceback / path / exception repr."""

@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "getbased-rag"
 version = "0.1.0"
 description = "getbased-rag — standalone RAG knowledge server (formerly the Electron-bundled Lens)"
+readme = "README.md"
+license = "GPL-3.0-only"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110",
