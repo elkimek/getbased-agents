@@ -1,0 +1,33 @@
+[Unit]
+Description=getbased-rag (local RAG knowledge server)
+Documentation=https://github.com/elkimek/getbased-rag
+After=network.target
+
+[Service]
+Type=exec
+# Default to the current user's XDG data dir. Override via /etc/default/getbased-rag
+# or an override.conf snippet if you want a system-wide install under /var/lib.
+EnvironmentFile=-/etc/default/getbased-rag
+Environment=LENS_HOST=127.0.0.1
+Environment=LENS_PORT=8322
+ExecStart=%h/.local/bin/lens serve
+Restart=on-failure
+RestartSec=5s
+
+# Hardening — the server only needs its data dir + a network socket.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/getbased
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false  # ONNX Runtime needs W^X exception
+RestrictRealtime=true
+
+[Install]
+WantedBy=default.target

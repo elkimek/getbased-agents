@@ -1,0 +1,14 @@
+{
+  "_comment": "Claude Code MCP configuration. Drop into ~/.claude/mcp.json (or merge with existing). Assumes getbased-rag is running on localhost:8322 (default). If RAG is on another host, set LENS_URL and LENS_API_KEY_FILE in env.",
+  "mcpServers": {
+    "getbased": {
+      "command": "getbased-mcp",
+      "env": {
+        "GETBASED_TOKEN": "paste-your-read-only-token-from-settings-agent-access-here",
+        "GETBASED_GATEWAY": "https://sync.getbased.health",
+        "LENS_URL": "http://localhost:8322",
+        "LENS_API_KEY_FILE": "~/.local/share/getbased/lens/api_key"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+# Hermes Agent MCP configuration snippet for ~/.hermes/config.yaml
+# See https://github.com/hermes-agent/hermes-agent for the full config schema.
+# Assumes getbased-rag is running on the same host at the default port.
+
+mcp_servers:
+  getbased:
+    command: getbased-mcp
+    env:
+      GETBASED_TOKEN: "paste-your-read-only-token-from-settings-agent-access-here"
+      GETBASED_GATEWAY: "https://sync.getbased.health"
+      LENS_URL: "http://localhost:8322"
+      LENS_API_KEY_FILE: "~/.local/share/getbased/lens/api_key"
