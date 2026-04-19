@@ -13,6 +13,37 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _maybe_load_user_env() -> None:
+    """Opt-in: load $XDG_CONFIG_HOME/getbased/env into os.environ.
+
+    Guarded by GETBASED_STACK_MANAGED=1. setdefault semantics — explicit env
+    wins. Silent on missing file; malformed lines skipped.
+    Escape hatch: GETBASED_NO_ENV_FILE=1 disables even when managed.
+    """
+    if os.environ.get("GETBASED_STACK_MANAGED") != "1":
+        return
+    if os.environ.get("GETBASED_NO_ENV_FILE") == "1":
+        return
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    path = os.path.join(xdg, "getbased", "env")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if key:
+            os.environ.setdefault(key, val)
+
+
 def _default_activity_log() -> Path:
     state = os.environ.get(
         "XDG_STATE_HOME", os.path.join(os.path.expanduser("~"), ".local", "state")
@@ -42,6 +73,7 @@ class DashboardConfig:
 
     @classmethod
     def from_env(cls) -> "DashboardConfig":
+        _maybe_load_user_env()
         return cls(
             host=os.environ.get("DASHBOARD_HOST", "127.0.0.1"),
             port=int(os.environ.get("DASHBOARD_PORT", "8323")),

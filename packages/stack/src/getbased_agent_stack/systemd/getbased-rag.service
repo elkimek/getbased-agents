@@ -5,13 +5,21 @@ After=network.target
 
 [Service]
 Type=exec
-# Default to the current user's XDG data dir. Override via /etc/default/getbased-rag
-# or an override.conf snippet if you want a system-wide install under /var/lib.
+# Shared env file written by `getbased-stack init` — carries GETBASED_TOKEN,
+# LENS_API_KEY_FILE, LENS_URL (and the GETBASED_STACK_MANAGED=1 opt-in
+# flag, which must be set for the Python env loader to pick up this file).
+# Optional: /etc/default/getbased-rag for system-wide overrides.
+EnvironmentFile=-%h/.config/getbased/env
 EnvironmentFile=-/etc/default/getbased-rag
+Environment=GETBASED_STACK_MANAGED=1
 Environment=LENS_HOST=127.0.0.1
 Environment=LENS_PORT=8322
 ExecStart=%h/.local/bin/lens serve
-Restart=on-failure
+# Restart=always (not on-failure) so a clean SIGTERM — e.g. operator stop
+# during troubleshooting — still brings the service back at the next boot.
+# Matches the failure mode that kept lens-rag.service dead for hours on
+# the Hermes VM until someone noticed.
+Restart=always
 RestartSec=5s
 
 # Hardening — the server only needs its data dir + a network socket.

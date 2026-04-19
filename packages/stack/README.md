@@ -1,6 +1,6 @@
 # getbased-agent-stack
 
-Meta-package bundling the full [getbased](https://getbased.health) agent stack into one install: the MCP adapter, the RAG engine, the browser dashboard, a thin discovery CLI, a hardened systemd unit, and example configs for Claude Code + Hermes.
+Meta-package bundling the full [getbased](https://getbased.health) agent stack into one install: the MCP adapter, the RAG engine, the browser dashboard, an orchestration CLI (`init` / `install` / `mcp-config`), hardened systemd units for rag + dashboard, and paste-ready configs for Claude Desktop/Code, Cursor, Cline, and Hermes.
 
 Part of the [getbased-agents monorepo](https://github.com/elkimek/getbased-agents).
 
@@ -20,36 +20,65 @@ Pulls:
 
 Total install: ~500 MB (the ML deps dominate). Smaller installs available — `pipx install getbased-mcp` (10 MB, agent only), `pipx install "getbased-rag[full]"` (RAG only), `pipx install getbased-dashboard` (UI + MCP; pulls rag if you want the Knowledge tab working).
 
-## Quickstart
+## Quickstart — one command
 
 ```bash
-# 1. Start the RAG server — local Qdrant DB + MiniLM embedder
-lens serve                               # blocks; serves on 127.0.0.1:8322
-lens key                                 # prints the bearer token
-
-# 2. Start the dashboard in another terminal
-getbased-dashboard serve                 # serves on 127.0.0.1:8323
-
-# 3. Open http://127.0.0.1:8323 in your browser, paste the lens key
-#    Create libraries, drag-drop files to ingest (live chunks/sec pill),
-#    run the MCP Test button to verify your agent path
-
-# 4. Wire the MCP into your AI client
-#    The dashboard's MCP tab generates paste-ready config blocks for
-#    Claude Desktop, Claude Code, Cursor, Cline, and Hermes.
+getbased-stack init
 ```
 
-Both the RAG server and the getbased PWA talk to the same `lens` instance — point the PWA at `http://127.0.0.1:8322` under **Settings → AI → Knowledge Base → External server** and the same corpus feeds the browser chat, the dashboard, and any MCP-connected agent.
+The wizard (~30 seconds):
 
-## Running as a systemd service
+1. Prompts for your `GETBASED_TOKEN` (skip if you don't use sync)
+2. Generates a rag API key if one doesn't exist
+3. Writes `~/.config/getbased/env` (mode 0600) — the shared config file
+4. Installs systemd user units for rag + dashboard, enables them, starts them
+
+Then paste one line into your MCP client:
 
 ```bash
-cp systemd/getbased-rag.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now getbased-rag
+getbased-stack mcp-config claude-desktop   # or: claude-code, cursor, cline, hermes
 ```
 
-The unit is hardened (`ProtectSystem=strict`, `NoNewPrivileges`, `RestrictAddressFamilies`, etc.); run `systemd-analyze security getbased-rag` to see the score.
+The snippet carries only `GETBASED_STACK_MANAGED=1` in its env block. No secrets in client configs — every MCP spawn reads the shared env file and loads the token + rag URL + API key path from there.
+
+Open the dashboard:
+
+```
+http://127.0.0.1:8323
+```
+
+Login URL with bearer key:
+
+```bash
+getbased-dashboard login-url   # prints http://127.0.0.1:8323/?key=...
+```
+
+Upload docs, create libraries, manage sources, and test the MCP probe from the web UI. Rotate the sync token from the CLI (see below) or by editing `~/.config/getbased/env` directly.
+
+### Surviving reboot on headless hosts
+
+User systemd services stop on logout. On a headless server (no GUI session), they won't come back at boot unless you enable linger once:
+
+```bash
+sudo loginctl enable-linger $USER
+```
+
+`getbased-stack init` prints this reminder when it detects a headless environment. On a laptop with a GUI login, linger is nice-to-have — services start when you log in.
+
+### Other commands
+
+```bash
+getbased-stack status          # env file, unit state, linger
+getbased-stack set GETBASED_TOKEN=new   # rotate the token
+getbased-stack install         # re-apply unit files after package upgrade
+getbased-stack uninstall       # stop + disable + remove units
+```
+
+### Migrating from an older install
+
+If you have a hand-rolled setup (standalone `lens-rag.service`, hermes-style `~/.hermes/config.yaml` with MCP env), **leave it alone** — `getbased-stack init` only writes new paths and installs new unit names (`getbased-rag.service`, `getbased-dashboard.service`), so it can coexist. The opt-in loader in every binary is gated on `GETBASED_STACK_MANAGED=1`; without that flag set, every binary behaves exactly as before.
+
+If you're running the existing Hermes VM deployment on this host, don't run `init` there. Your `~/.hermes/config.yaml` continues to supply env explicitly; nothing from this package touches it.
 
 ## Architecture
 
@@ -78,6 +107,7 @@ The dashboard is likewise stateless — it proxies rag for Knowledge operations,
 |---|---|---|---|---|
 | 0.1.x | ≥0.2.0 | ≥0.1.0 | — | v1 (multi-library) |
 | 0.2.x | ≥0.2.2 | ≥0.6.0 | ≥0.5.0 | v1 (+ streaming ingest, per-library models) |
+| 0.4.x | ≥0.2.3 | ≥0.7.1 | ≥0.6.1 | v1 (+ shared env file, `getbased-stack init`, systemd units) |
 
 Bump the meta's major when sibling protocols break; bump siblings freely for normal features.
 
