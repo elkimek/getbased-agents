@@ -6,6 +6,37 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 
+def _maybe_load_user_env() -> None:
+    """Opt-in: load $XDG_CONFIG_HOME/getbased/env into os.environ.
+
+    Guarded by GETBASED_STACK_MANAGED=1. setdefault semantics — explicit env
+    wins. Silent on missing file; malformed lines skipped.
+    Escape hatch: GETBASED_NO_ENV_FILE=1 disables even when managed.
+    """
+    if os.environ.get("GETBASED_STACK_MANAGED") != "1":
+        return
+    if os.environ.get("GETBASED_NO_ENV_FILE") == "1":
+        return
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    path = os.path.join(xdg, "getbased", "env")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if key:
+            os.environ.setdefault(key, val)
+
+
 def _default_data_dir() -> Path:
     """Default data directory — platform-specific, matches what Tauri's
     dirs::data_dir() crate returns so the CLI and the desktop app share one
@@ -89,6 +120,7 @@ class LensConfig:
     @classmethod
     def from_env(cls) -> "LensConfig":
         """Load config from environment variables."""
+        _maybe_load_user_env()
         data_dir = Path(os.environ.get("LENS_DATA_DIR", str(_default_data_dir())))
 
         return cls(

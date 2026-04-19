@@ -21,6 +21,42 @@ import time
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+
+def _maybe_load_user_env() -> None:
+    """Opt-in: load $XDG_CONFIG_HOME/getbased/env into os.environ.
+
+    Guarded by GETBASED_STACK_MANAGED=1 so existing deployments that wire env
+    explicitly (Hermes via ~/.hermes/config.yaml, hand-rolled setups) are
+    untouched. Uses setdefault — an explicit env var always wins over the file.
+    Silent on a missing file; malformed lines skipped without crashing.
+    Escape hatch: GETBASED_NO_ENV_FILE=1 disables even when managed.
+    """
+    if os.environ.get("GETBASED_STACK_MANAGED") != "1":
+        return
+    if os.environ.get("GETBASED_NO_ENV_FILE") == "1":
+        return
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    path = os.path.join(xdg, "getbased", "env")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if key:
+            os.environ.setdefault(key, val)
+
+
+_maybe_load_user_env()
+
 log = logging.getLogger("getbased_mcp")
 
 mcp = FastMCP("getbased")

@@ -1,0 +1,36 @@
+[Unit]
+Description=getbased-dashboard (web UI for rag + mcp management)
+Documentation=https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard
+After=network.target getbased-rag.service
+Wants=getbased-rag.service
+
+[Service]
+Type=exec
+# Same shared env file as rag + mcp — one token, one key path, one flag.
+EnvironmentFile=-%h/.config/getbased/env
+EnvironmentFile=-/etc/default/getbased-dashboard
+Environment=GETBASED_STACK_MANAGED=1
+Environment=DASHBOARD_HOST=127.0.0.1
+Environment=DASHBOARD_PORT=8323
+ExecStart=%h/.local/bin/getbased-dashboard serve
+Restart=always
+RestartSec=5s
+
+# Hardening — the dashboard is a localhost-only HTTP server.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+# Needs write access for session state, activity log tailing, and writing
+# the shared env file when the user edits the token in the MCP tab.
+ReadWritePaths=%h/.local/state/getbased %h/.config/getbased
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=default.target

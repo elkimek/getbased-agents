@@ -39,7 +39,13 @@ pipx install getbased-dashboard      # web UI; pulls the MCP dep alongside it
 
 ## Quickstart
 
-See [`packages/stack/README.md`](packages/stack/README.md) — walks through starting the RAG server, wiring the MCP into Claude Code and Hermes, and pointing the PWA at the same backend.
+```bash
+pipx install "getbased-agent-stack[full]"
+getbased-stack init                        # wizard: token, API key, systemd units
+getbased-stack mcp-config claude-desktop   # paste the snippet into your MCP client
+```
+
+That's it — rag + dashboard are running as systemd user services; your MCP client has everything it needs. See [`packages/stack/README.md`](packages/stack/README.md) for the full flow including linger-for-headless and token rotation.
 
 ## Development
 
