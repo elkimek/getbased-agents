@@ -16,7 +16,9 @@ ExecStart=%h/.local/bin/getbased-dashboard serve
 Restart=always
 RestartSec=5s
 
-# Hardening — the dashboard is a localhost-only HTTP server.
+# User-mode-compatible hardening only — see getbased-rag.service for
+# the list of CAP_SYS_ADMIN-requiring directives that fail with
+# 218/CAPABILITIES under `systemctl --user` and are deliberately omitted.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
@@ -24,13 +26,7 @@ ProtectHome=read-only
 # the shared env file when the user edits the token in the MCP tab.
 ReadWritePaths=%h/.local/state/getbased %h/.config/getbased
 PrivateTmp=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-RestrictNamespaces=true
 LockPersonality=true
-RestrictRealtime=true
 
 [Install]
 WantedBy=default.target

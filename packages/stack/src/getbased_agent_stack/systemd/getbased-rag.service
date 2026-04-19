@@ -22,20 +22,19 @@ ExecStart=%h/.local/bin/lens serve
 Restart=always
 RestartSec=5s
 
-# Hardening — the server only needs its data dir + a network socket.
+# User-mode-compatible hardening only. Directives that require
+# CAP_SYS_ADMIN (ProtectKernelTunables, ProtectKernelModules,
+# ProtectControlGroups, RestrictNamespaces, RestrictAddressFamilies,
+# RestrictRealtime, MemoryDenyWriteExecute) fail with 218/CAPABILITIES
+# under `systemctl --user` on a non-privileged bus and are omitted.
+# For a hardened system-service deployment, promote this unit to
+# /etc/systemd/system/ and re-add those directives.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=%h/.local/share/getbased
 PrivateTmp=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-RestrictNamespaces=true
 LockPersonality=true
-MemoryDenyWriteExecute=false  # ONNX Runtime needs W^X exception
-RestrictRealtime=true
 
 [Install]
 WantedBy=default.target
