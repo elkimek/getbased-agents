@@ -140,3 +140,58 @@ def test_test_reports_error_when_mcp_missing(
     body = r.json()
     assert body["ok"] is False
     assert "not found" in body["error"]
+
+
+def test_mcp_command_path_prefers_same_venv_as_dashboard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: `shutil.which` searches PATH, but a dashboard started
+    via `/path/to/.venv/bin/getbased-dashboard` doesn't have that venv
+    on PATH. The MCP sibling binary sits next to the Python that
+    launched us — check that neighbourhood first."""
+    import sys
+    from getbased_dashboard.api import mcp as mcp_api
+
+    # Build a fake venv layout: bin/python + bin/getbased-mcp
+    fake_venv_bin = tmp_path / "fakevenv" / "bin"
+    fake_venv_bin.mkdir(parents=True)
+    fake_python = fake_venv_bin / "python"
+    fake_python.write_text("#!/bin/sh\nexec /usr/bin/env python3 \"$@\"")
+    fake_python.chmod(0o755)
+    fake_mcp = fake_venv_bin / "getbased-mcp"
+    fake_mcp.write_text("#!/bin/sh\necho hi")
+    fake_mcp.chmod(0o755)
+
+    # Point sys.executable at the fake venv's python, and wipe PATH so
+    # shutil.which cannot be the thing that saves us — this isolates the
+    # "same venv as dashboard" branch.
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    resolved = mcp_api._mcp_command_path()
+    assert resolved == str(fake_mcp)
+
+
+def test_mcp_command_path_falls_back_to_which(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the sibling binary isn't there, shutil.which kicks in."""
+    import sys
+    from getbased_dashboard.api import mcp as mcp_api
+
+    bare_bin = tmp_path / "empty" / "bin"
+    bare_bin.mkdir(parents=True)
+    fake_python = bare_bin / "python"
+    fake_python.write_text("")
+    fake_python.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+
+    # Place getbased-mcp somewhere on PATH
+    which_dir = tmp_path / "which-dir"
+    which_dir.mkdir()
+    which_target = which_dir / "getbased-mcp"
+    which_target.write_text("#!/bin/sh\necho hi")
+    which_target.chmod(0o755)
+    monkeypatch.setenv("PATH", str(which_dir))
+
+    assert mcp_api._mcp_command_path() == str(which_target)

@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 import time
 from importlib import reload
 from typing import Literal
@@ -64,10 +65,19 @@ def _resolved_mcp_env(cfg: DashboardConfig) -> dict:
 
 
 def _mcp_command_path() -> str:
-    """Locate the `getbased-mcp` CLI. Prefer the install that ships with
-    this dashboard (same venv — picked up via `shutil.which`); fall back
-    to the bare name relying on PATH. Users can always edit the generated
-    config by hand if we guess wrong."""
+    """Locate the `getbased-mcp` CLI. Preference order:
+      1. Same venv as the running dashboard — `getbased-mcp` sits next
+         to the Python that launched us. Handles `uv run`, activated
+         venvs, and `pipx install` all at once.
+      2. PATH lookup via `shutil.which`.
+      3. Bare name — config generator still works; `run test` will 404.
+    We want (1) first because dashboards run via `.venv/bin/getbased-
+    dashboard` don't have their venv on PATH, so `shutil.which` misses
+    the right binary even though it's sitting right next door."""
+    venv_bin = os.path.dirname(sys.executable)
+    candidate = os.path.join(venv_bin, "getbased-mcp")
+    if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+        return candidate
     found = shutil.which("getbased-mcp")
     return found or "getbased-mcp"
 

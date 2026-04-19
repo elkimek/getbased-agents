@@ -389,8 +389,19 @@ def create_app(config: LensConfig) -> FastAPI:
             # server import if ingest is never called.
             from .ingest import ingest_path
 
+            # Reuse the server's live store + embedder + backend so we
+            # don't race the server's QdrantBackend for the local Qdrant
+            # file lock. Creating a fresh QdrantBackend in the ingest
+            # path would fail with AlreadyLocked whenever the server is
+            # up, which is the normal case.
             try:
-                result = ingest_path(config, tmp_path)
+                result = ingest_path(
+                    config,
+                    tmp_path,
+                    store=active_store(),
+                    embedder=get_embedder(),
+                    backend=_get_backend(),
+                )
             except FileNotFoundError as e:
                 raise HTTPException(400, str(e))
             except Exception:

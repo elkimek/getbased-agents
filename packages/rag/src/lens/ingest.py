@@ -94,7 +94,14 @@ def _walk(root: Path) -> Iterator[Path]:
             yield p
 
 
-def ingest_path(config: LensConfig, source: Path, emit_progress: bool = False) -> dict:
+def ingest_path(
+    config: LensConfig,
+    source: Path,
+    emit_progress: bool = False,
+    store: Store | None = None,
+    embedder=None,
+    backend: QdrantBackend | None = None,
+) -> dict:
     """Ingest a file or directory into the lens store. Returns summary stats.
     A .zip input is auto-extracted into a temp directory and ingested as if
     the user had passed that directory; the temp dir is removed on exit.
@@ -104,15 +111,34 @@ def ingest_path(config: LensConfig, source: Path, emit_progress: bool = False) -
     {"event":"file","index":i,"total":N,"source":"...","chunks":n}. The
     final line is the result dict (no "event" key) so Rust can route
     JSONL lines to progress state vs result capture.
+
+    `store`, `embedder`, and `backend` are for in-process reuse — when the
+    HTTP server calls ingest it passes its own singletons, otherwise a
+    second QdrantBackend would race the server for the file lock on local
+    Qdrant. CLI callers leave them None and get fresh instances.
     """
     if not source.exists():
         raise FileNotFoundError(f"No such path: {source}")
 
     with _expand_zip_if_needed(source) as walk_root:
-        return _ingest_walk(config, walk_root, emit_progress=emit_progress)
+        return _ingest_walk(
+            config,
+            walk_root,
+            emit_progress=emit_progress,
+            store=store,
+            embedder=embedder,
+            backend=backend,
+        )
 
 
-def _ingest_walk(config: LensConfig, source: Path, emit_progress: bool = False) -> dict:
+def _ingest_walk(
+    config: LensConfig,
+    source: Path,
+    emit_progress: bool = False,
+    store: Store | None = None,
+    embedder=None,
+    backend: QdrantBackend | None = None,
+) -> dict:
     import json as _json
     import sys as _sys
 
@@ -124,13 +150,16 @@ def _ingest_walk(config: LensConfig, source: Path, emit_progress: bool = False) 
         # if they ever run `lens ingest --json` manually.
         print(_json.dumps(event), file=_sys.stderr, flush=True)
 
-    embedder = create_embedder(config)
+    if embedder is None:
+        embedder = create_embedder(config)
     # Ingest always targets the ACTIVE library. Bootstrap a default library
     # if none exists — mirrors the browser-local lens semantics.
-    registry = Registry(config)
-    registry.ensure_default()
-    backend = QdrantBackend(config)
-    store = Store(config, collection=registry.active_collection(), backend=backend)
+    if store is None:
+        registry = Registry(config)
+        registry.ensure_default()
+        if backend is None:
+            backend = QdrantBackend(config)
+        store = Store(config, collection=registry.active_collection(), backend=backend)
     store.ensure_collection(embedder.dimension())
 
     # Pre-walk to get a total count for progress. Cheap — just scans filenames,

@@ -382,6 +382,47 @@ def test_ingest_rejects_empty_upload(client: TestClient, auth: dict) -> None:
     assert r.status_code in (400, 422)
 
 
+def test_ingest_reuses_server_backend_not_a_fresh_one(
+    client: TestClient, auth: dict, monkeypatch
+) -> None:
+    """Regression for the local-Qdrant lock collision: the /ingest endpoint
+    must pass the server's live QdrantBackend into ingest_path, not let
+    ingest_path instantiate a fresh one. A fresh backend would try to
+    open a second QdrantClient on the same on-disk path and raise
+    AlreadyLocked, breaking ingest whenever the server is running.
+
+    We can't easily reproduce the lock with the test fixture (which
+    deliberately shares a QdrantClient across seeder + server to sidestep
+    the issue), so instead we assert behaviourally: if the server is
+    wiring its backend through, then calling QdrantBackend() inside
+    ingest_path would never happen. Patch QdrantBackend to raise on
+    instantiation and verify ingest still succeeds."""
+    # Raise loudly if anyone constructs a second QdrantBackend during the
+    # ingest call — catches any regression where the endpoint stops
+    # threading the backend argument.
+    from lens import ingest as ingest_mod
+
+    original = ingest_mod.QdrantBackend
+
+    def boom(*_a, **_kw):
+        raise AssertionError(
+            "ingest_path tried to create a new QdrantBackend — it should "
+            "reuse the server's singleton via the `backend`/`store` args"
+        )
+
+    monkeypatch.setattr(ingest_mod, "QdrantBackend", boom)
+    try:
+        r = client.post(
+            "/ingest",
+            headers=auth,
+            files=[("files", ("notes.md", b"# hi\n" + b"x " * 200, "text/markdown"))],
+        )
+        assert r.status_code == 200, r.text
+        assert r.json().get("chunks_indexed", 0) >= 1
+    finally:
+        monkeypatch.setattr(ingest_mod, "QdrantBackend", original)
+
+
 def test_ingest_rejects_oversize_upload(
     client: TestClient, auth: dict, monkeypatch
 ) -> None:
