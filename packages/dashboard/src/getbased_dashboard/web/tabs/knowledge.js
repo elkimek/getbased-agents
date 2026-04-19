@@ -106,7 +106,8 @@ function renderLibraries(root) {
         <div class="panel-sub">Drop files into the active library</div>
       </div>
       <div id="drop-zone" class="drop-zone">
-        <p>Drag &amp; drop .md / .txt / .pdf / .docx / .zip here, or <label class="link">pick files<input type="file" id="file-input" multiple hidden></label></p>
+        <p>Drag &amp; drop .md / .txt / .pdf / .docx / .zip here, or <button type="button" id="pick-files-btn" class="link">pick files</button></p>
+        <input type="file" id="file-input" class="visually-hidden" multiple />
         <div id="ingest-status" class="ingest-status"></div>
       </div>
     </section>
@@ -285,6 +286,15 @@ function wireHandlers(root) {
   );
   dz.addEventListener("drop", (e) => doIngest(e.dataTransfer.files));
   input.addEventListener("change", () => doIngest(input.files));
+
+  // Click "pick files" → open the native picker. We avoid the
+  // <label>-wraps-hidden-input pattern because modern Chrome will not
+  // open the picker when the input is display:none (the `hidden` attr
+  // sets that). Triggering .click() on an offscreen-but-rendered input
+  // is the reliable cross-browser approach.
+  root
+    .querySelector("#pick-files-btn")
+    .addEventListener("click", () => input.click());
 }
 
 export async function render(root) {

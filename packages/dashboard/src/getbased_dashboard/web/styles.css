@@ -225,7 +225,30 @@ code {
   transition: border-color 0.12s, background 0.12s;
 }
 .drop-zone.hover { border-color: var(--accent); background: var(--bg); }
-.drop-zone .link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.drop-zone .link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  padding: 0;
+}
+/* Keep the file input interactive (so `input.click()` opens the native
+ * picker) while hiding it visually. `display:none` / `visibility:hidden`
+ * both break programmatic click on file inputs in modern Chrome — this
+ * pattern keeps the element rendered off-screen. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 .ingest-status { margin-top: 10px; font-size: 13px; min-height: 1em; }
 .ingest-status.ok { color: var(--ok); }
 .ingest-status.err { color: var(--danger); }
