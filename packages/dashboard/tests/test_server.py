@@ -32,6 +32,36 @@ def test_health_reports_missing_key(tmp_path: Path) -> None:
     assert body["has_api_key"] is False
 
 
+def test_health_version_matches_package(client: TestClient) -> None:
+    """Regression: the hard-coded "0.1.0" in /api/health drifted from the
+    pyproject version across three minor releases before we noticed. The
+    endpoint now pulls from importlib.metadata — this test locks that
+    contract so any future re-hard-coding of a string literal blows up
+    loudly in CI."""
+    from getbased_dashboard import __version__
+
+    body = client.get("/api/health").json()
+    assert body["version"] == __version__
+    # Belt-and-suspenders: the fallback sentinel means package metadata
+    # wasn't found, which in CI means the wheel isn't actually installed.
+    assert body["version"] != "0+unknown", (
+        "Package metadata missing — tests should run against an installed wheel"
+    )
+
+
+def test_health_reports_platform(client: TestClient) -> None:
+    """Frontend uses `platform` to pick OS-appropriate absolute paths in
+    MCP config filename hints. Must be lowercased, and must be one of
+    the values platform.system() returns (linux/darwin/windows) — the JS
+    branches on those exact strings."""
+    body = client.get("/api/health").json()
+    assert "platform" in body
+    assert body["platform"] == body["platform"].lower()
+    # On the supported OSes, one of these strings will match; on CI we
+    # expect linux. Test simply asserts it's a non-empty lowercase.
+    assert body["platform"]
+
+
 # ─── /api/auth/check ───────────────────────────────────────────────────
 
 def test_auth_check_requires_bearer(client: TestClient) -> None:

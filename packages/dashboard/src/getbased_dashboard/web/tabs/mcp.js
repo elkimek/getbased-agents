@@ -41,6 +41,7 @@ const CLIENTS = [
   { id: "cursor", label: "Cursor" },
   { id: "cline", label: "Cline" },
   { id: "hermes", label: "Hermes" },
+  { id: "openclaw", label: "OpenClaw" },
 ];
 
 export async function render(root) {
@@ -87,31 +88,63 @@ export async function render(root) {
   wireHandlers(root);
 }
 
+function _copyBtn(value, label = "copy") {
+  // Small inline copy button bound to a specific string. Kept lightweight
+  // (no dataset indirection) so callers can add arbitrary copy-ables
+  // without a new wiring hook per field.
+  const v = String(value == null ? "" : value);
+  return `<button type="button" class="ghost mini-copy" data-copy="${esc(v)}">${esc(label)}</button>`;
+}
+
 async function loadEnv(root) {
   const body = root.querySelector("#env-body");
   try {
     const e = await j("/api/mcp/env");
     body.innerHTML = `
-      <div class="kv-k">LENS_URL</div>
-      <div class="kv-v"><code>${esc(e.lens_url)}</code></div>
-      <div class="kv-k">LENS_API_KEY_FILE</div>
-      <div class="kv-v"><code>${esc(e.lens_api_key_file)}</code> ${e.lens_api_key_present ? '<span class="badge ok">present</span>' : '<span class="badge err">missing</span>'}</div>
+      <div class="kv-k" title="The URL the MCP adapter talks to. Paste this into your AI client's MCP env block if you override the default.">LENS_URL</div>
+      <div class="kv-v"><code>${esc(e.lens_url)}</code> ${_copyBtn(e.lens_url)}</div>
+      <div class="kv-k" title="Path to the bearer-key file on disk. Same key the PWA's External server field wants.">LENS_API_KEY_FILE</div>
+      <div class="kv-v"><code>${esc(e.lens_api_key_file)}</code> ${_copyBtn(e.lens_api_key_file)} ${e.lens_api_key_present ? '<span class="badge ok">present</span>' : '<span class="badge err">missing</span>'}</div>
       <div class="kv-k" title="The bearer token rag generated on first start. Paste into the getbased PWA's External server field or into an AI client's MCP config.">LENS_API_KEY</div>
       <div class="kv-v">
         <code id="api-key-value">${'\u2022'.repeat(32)}</code>
-        <button type="button" id="reveal-api-key" class="ghost" style="font-size:10px;padding:2px 8px">show</button>
-        <button type="button" id="copy-api-key" class="ghost" style="font-size:10px;padding:2px 8px">copy</button>
+        <button type="button" id="reveal-api-key" class="ghost mini-copy">show</button>
+        <button type="button" id="copy-api-key" class="ghost mini-copy">copy</button>
       </div>
-      <div class="kv-k">GETBASED_GATEWAY</div>
-      <div class="kv-v"><code>${esc(e.getbased_gateway)}</code></div>
-      <div class="kv-k" title="The MCP reads GETBASED_TOKEN from the env of whatever launches it (Claude Desktop, Hermes, Claude Code, etc). This row reflects the dashboard's own env — i.e. what a locally-spawned MCP would inherit. In production, the token goes in the client's config file, not here.">GETBASED_TOKEN</div>
-      <div class="kv-v">${e.getbased_token_present ? '<span class="badge ok">set</span>' : '<span class="badge err" title="Empty in the dashboard\'s env. This is expected when running locally without the sync gateway — the token normally lives in your AI client\'s MCP config block, not here.">not set — configure via client env</span>'}</div>
-      <div class="kv-k">MCP module</div>
+      <div class="kv-k" title="One-click magic login URL — paste into another browser / second device and it auto-signs-in. Same pattern as Jupyter Lab / Open WebUI / code-server. The URL embeds the bearer key as a query param, so treat it like the key itself.">LOGIN URL</div>
+      <div class="kv-v">
+        <code id="login-url-value">${'\u2022'.repeat(40)}</code>
+        <button type="button" id="reveal-login-url" class="ghost mini-copy">show</button>
+        <button type="button" id="copy-login-url" class="ghost mini-copy">copy</button>
+      </div>
+      <div class="kv-k" title="Where the MCP will send agent-access requests when your AI client provides a GETBASED_TOKEN.">GETBASED_GATEWAY</div>
+      <div class="kv-v"><code>${esc(e.getbased_gateway)}</code> ${_copyBtn(e.getbased_gateway)}</div>
+      <div class="kv-k" title="The MCP reads GETBASED_TOKEN from the env of whatever launches it (Claude Desktop, Hermes, Claude Code, etc). This row reflects the dashboard's own env — i.e. what a locally-spawned MCP would inherit. Normally the token lives in your AI client's MCP config block, not here.">GETBASED_TOKEN</div>
+      <div class="kv-v">${e.getbased_token_present ? '<span class="badge ok">set</span>' : '<span class="badge warn" title="Empty in the dashboard\'s env. This is expected when running locally without the sync gateway — the token normally lives in your AI client\'s MCP config block, not here.">configure in your client\'s MCP env</span>'}</div>
+      <div class="kv-k" title="Filesystem path to the getbased_mcp Python module. Useful when debugging package-version mismatches.">MCP module</div>
       <div class="kv-v"><code>${esc(e.mcp_module_path)}</code></div>
     `;
+    _wireMiniCopy(body);
   } catch (err) {
     body.innerHTML = `<p class="err">${esc(err.message)}</p>`;
   }
+}
+
+function _wireMiniCopy(root) {
+  root.querySelectorAll(".mini-copy[data-copy]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const v = btn.dataset.copy || "";
+      try {
+        await navigator.clipboard.writeText(v);
+        const prev = btn.textContent;
+        btn.textContent = "copied ✓";
+        setTimeout(() => (btn.textContent = prev), 1200);
+      } catch {
+        // Silently no-op on insecure-context clipboard blocks — the
+        // user can still select the <code> text manually.
+      }
+    });
+  });
 }
 
 async function loadConfig(root) {
@@ -122,7 +155,12 @@ async function loadConfig(root) {
   fnEl.textContent = "";
   try {
     const cfg = await j(`/api/mcp/config?client=${encodeURIComponent(client)}`);
-    fnEl.innerHTML = `Paste into: <code>${esc(cfg.filename)}</code>`;
+    fnEl.innerHTML = `
+      <span class="cfg-filename-label">Paste into</span>
+      <code>${esc(cfg.filename)}</code>
+      <button type="button" class="ghost mini-copy" data-copy="${esc(cfg.filename)}">copy path</button>
+    `;
+    _wireMiniCopy(fnEl);
     pre.textContent = cfg.content;
   } catch (err) {
     pre.textContent = "";
@@ -132,7 +170,7 @@ async function loadConfig(root) {
 
 async function runTest(root) {
   const out = root.querySelector("#test-body");
-  out.innerHTML = '<p class="dim">Spawning MCP…</p>';
+  out.innerHTML = '<p class="dim"><span class="spinner" aria-hidden="true"></span> Spawning MCP subprocess…</p>';
   try {
     const r = await j("/api/mcp/test", { method: "POST" });
     if (!r.ok) {
@@ -213,6 +251,59 @@ function wireHandlers(root) {
         // context (http non-localhost) or user denied permission.
         const { showAlert } = await import("../modals.js");
         await showAlert("Copy failed — reveal the key and select it manually.", { tone: "error" });
+      }
+    });
+  }
+
+  // Login URL row — builds `<current origin>/?key=<bearer>` and reuses
+  // the masked/reveal/copy pattern the key row established. The URL is
+  // as sensitive as the key itself (anyone with it is signed in), so
+  // same 15s auto-remask window.
+  const revealUrlBtn = root.querySelector("#reveal-login-url");
+  const copyUrlBtn = root.querySelector("#copy-login-url");
+  const urlEl = root.querySelector("#login-url-value");
+  let urlRevealTimer = null;
+  async function _buildLoginUrl() {
+    const key = await _fetchApiKey();
+    if (!key) return "";
+    return `${window.location.origin}/?key=${encodeURIComponent(key)}`;
+  }
+  if (revealUrlBtn && urlEl) {
+    revealUrlBtn.addEventListener("click", async () => {
+      if (revealUrlBtn.textContent === "hide") {
+        urlEl.textContent = _maskKey(40);
+        revealUrlBtn.textContent = "show";
+        if (urlRevealTimer) { clearTimeout(urlRevealTimer); urlRevealTimer = null; }
+        return;
+      }
+      try {
+        const url = await _buildLoginUrl();
+        if (!url) { urlEl.textContent = "(no key — rag never started?)"; return; }
+        urlEl.textContent = url;
+        revealUrlBtn.textContent = "hide";
+        if (urlRevealTimer) clearTimeout(urlRevealTimer);
+        urlRevealTimer = setTimeout(() => {
+          urlEl.textContent = _maskKey(40);
+          revealUrlBtn.textContent = "show";
+          urlRevealTimer = null;
+        }, 15_000);
+      } catch (err) {
+        urlEl.textContent = `(error: ${err.message})`;
+      }
+    });
+  }
+  if (copyUrlBtn) {
+    copyUrlBtn.addEventListener("click", async () => {
+      try {
+        const url = await _buildLoginUrl();
+        if (!url) return;
+        await navigator.clipboard.writeText(url);
+        const prev = copyUrlBtn.textContent;
+        copyUrlBtn.textContent = "copied ✓";
+        setTimeout(() => (copyUrlBtn.textContent = prev), 1200);
+      } catch {
+        const { showAlert } = await import("../modals.js");
+        await showAlert("Copy failed — reveal the URL and select it manually.", { tone: "error" });
       }
     });
   }

@@ -72,3 +72,40 @@ def test_info_command_shows_config(tmp_path: Path, monkeypatch) -> None:
     # Never leaks the actual key in `info` output — that's what the UI's
     # authed show/copy affordance is for.
     assert "probe-key" not in result.output
+
+
+def test_login_url_prints_full_url(tmp_path: Path, monkeypatch) -> None:
+    """Users lose the original terminal output all the time (systemd
+    service, tmux reap, laptop reboot). `login-url` re-prints the
+    exact magic URL the `serve` banner shows, on demand — so users can
+    bookmark / share / re-open without hunting for the key file."""
+    key_file = tmp_path / "api_key"
+    key_file.write_text("bearer-xyz-789")
+    monkeypatch.setenv("LENS_API_KEY_FILE", str(key_file))
+    monkeypatch.setenv("DASHBOARD_PORT", "9333")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["login-url"])
+
+    assert result.exit_code == 0
+    # Exact URL shape the frontend auto-captures via ?key=
+    assert "http://127.0.0.1:9333/?key=bearer-xyz-789" in result.output
+
+
+def test_login_url_exits_nonzero_when_no_key(tmp_path: Path, monkeypatch) -> None:
+    """Scripts wrapping this command need to distinguish 'URL printed'
+    from 'dashboard isn't ready yet'. We exit 1 on missing key, with a
+    hint on stderr about what to do next."""
+    missing = tmp_path / "never-there"
+    monkeypatch.setenv("LENS_API_KEY_FILE", str(missing))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["login-url"])
+
+    assert result.exit_code == 1
+    # No URL leaked — we write nothing to stdout on missing-key and the
+    # user-facing hint goes to stderr. CliRunner merges them in
+    # result.output; checking here that the URL doesn't sneak in and
+    # that the hint text is present is enough for the signal.
+    assert "http://" not in result.output
+    assert "No API key" in result.output

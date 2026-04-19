@@ -70,7 +70,16 @@ def test_config_claude_desktop_json_shape(client: TestClient) -> None:
     assert r.status_code == 200
     out = r.json()
     assert out["client"] == "claude-desktop"
+    # Filename now carries an OS-aware absolute path so the user doesn't
+    # have to Google where claude_desktop_config.json actually lives.
     assert "claude_desktop_config.json" in out["filename"]
+    # Absolute-ish on each platform: macOS has `Library`, Windows has
+    # `%APPDATA%`, Linux has `~/.config` — all three contain a path sep
+    # prefix we can cheaply assert.
+    assert any(
+        marker in out["filename"]
+        for marker in ("~/Library/", "%APPDATA%", "~/.config/")
+    ), out["filename"]
     body = json.loads(out["content"])
     assert "mcpServers" in body
     entry = body["mcpServers"]["getbased"]
@@ -89,6 +98,29 @@ def test_config_other_json_clients_share_shape(
     body = json.loads(r.json()["content"])
     assert "mcpServers" in body
     assert "getbased" in body["mcpServers"]
+
+
+def test_config_openclaw_uses_nested_mcp_servers_shape(client: TestClient) -> None:
+    """OpenClaw nests under `mcp.servers.<name>` — NOT the `mcpServers`
+    top-level key Anthropic's clients use. Shipping the wrong shape means
+    OpenClaw silently ignores the block. The command/args/env leaves are
+    identical to the Anthropic-shape clients, so only the outer nesting
+    is OpenClaw-specific."""
+    r = client.get("/api/mcp/config?client=openclaw", headers=AUTH)
+    assert r.status_code == 200
+    out = r.json()
+    assert out["client"] == "openclaw"
+    assert "openclaw.json" in out["filename"]
+    body = json.loads(out["content"])
+    # Wrong shape — must NOT be present
+    assert "mcpServers" not in body
+    # Right shape — `mcp.servers.<name>`
+    assert "mcp" in body and "servers" in body["mcp"]
+    entry = body["mcp"]["servers"]["getbased"]
+    assert entry["command"]
+    assert entry["args"] == []
+    assert entry["env"]["LENS_URL"] == "http://lens.test:8322"
+    assert "<paste" in entry["env"]["GETBASED_TOKEN"]
 
 
 def test_config_hermes_is_yaml_with_enabled_tools(client: TestClient) -> None:

@@ -61,7 +61,7 @@ async function load(root) {
         <div class="stat-card"><div class="stat-v">${stats.total_calls}</div><div class="stat-l">total calls</div></div>
         <div class="stat-card"><div class="stat-v">${stats.total_errors}</div><div class="stat-l">errors</div></div>
         <div class="stat-card"><div class="stat-v">${fmtRate(stats.overall_error_rate)}</div><div class="stat-l">error rate</div></div>
-        <div class="stat-card"><div class="stat-v">${stats.tools.length}</div><div class="stat-l">tools in use</div></div>
+        <div class="stat-card" title="Number of distinct MCP tools that have been called at least once."><div class="stat-v">${stats.tools.length}</div><div class="stat-l">tools called</div></div>
       </div>
     `;
 
@@ -87,7 +87,7 @@ async function load(root) {
           </tbody>
         </table>
       `
-      : '<p class="dim">No tool calls logged yet. Once your AI client invokes an MCP tool, records show up here.</p>';
+      : '<p class="dim">No tool calls logged yet. Wire up your agent first — head to the <button type="button" class="link" data-link-tab="mcp">MCP tab</button> to grab its config.</p>';
 
     const feed = records.length
       ? `<ul class="activity-feed">
@@ -108,7 +108,7 @@ async function load(root) {
       <section class="panel">
         <div class="panel-head">
           <h2>Usage</h2>
-          <div class="panel-sub">Log: <code>${esc(data.log_path)}</code> · <button id="clear-log" class="ghost">clear</button></div>
+          <div class="panel-sub">Log: <code>${esc(data.log_path)}</code> · <button id="clear-log" class="ghost danger">clear log</button></div>
         </div>
         ${topStats}
         ${perTool}
@@ -119,6 +119,15 @@ async function load(root) {
         ${feed}
       </section>
     `;
+
+    // Cross-tab link from empty state → MCP tab
+    root.querySelectorAll("[data-link-tab]").forEach((a) => {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        const btn = document.querySelector(`.tab[data-tab="${a.dataset.linkTab}"]`);
+        if (btn) btn.click();
+      });
+    });
 
     root.querySelector("#clear-log").addEventListener("click", async () => {
       const ok = await showConfirm(

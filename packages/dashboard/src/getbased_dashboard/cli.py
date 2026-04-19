@@ -48,10 +48,14 @@ def serve(
         # Jupyter Lab / Open WebUI / code-server convention. The key
         # is the same bearer the user would paste anyway; having it
         # in the URL once, on the loopback interface, is a net UX win
-        # over requiring a terminal hop.
+        # over requiring a terminal hop. Tagged with [LOGIN-URL] so
+        # users grepping `journalctl` on a systemd deploy can find it.
         typer.echo("")
         typer.echo("  Open the dashboard with one click:")
-        typer.echo(f"  {base_url}/?key={key}")
+        typer.echo(f"  [LOGIN-URL] {base_url}/?key={key}")
+        typer.echo(
+            "  (lost this URL? run `getbased-dashboard login-url` to re-print it)"
+        )
     else:
         typer.echo("  ⚠ no key found — start getbased-rag to generate one")
 
@@ -77,3 +81,33 @@ def info() -> None:
     typer.echo(f"api_key_file:    {cfg.api_key_file}")
     typer.echo(f"api_key_present: {bool(cfg.read_api_key())}")
     typer.echo(f"activity_log:    {cfg.activity_log}")
+    # Never echoes the key itself — only whether it was found. That's
+    # deliberate: `info` is the command you paste into a support thread.
+    # If the user wants the login URL for a second browser, they call
+    # `login-url` which makes the secret-exposure intent explicit.
+
+
+@app.command("login-url")
+def login_url() -> None:
+    """Print the one-click dashboard login URL.
+
+    The URL embeds the bearer key as a query parameter — same pattern
+    as Jupyter Lab / Open WebUI / code-server. Intended uses:
+
+      * Reconnect after closing the original `serve` terminal
+      * Open the dashboard from a second browser or device
+      * Fetch the URL when the dashboard runs as a systemd / launchd
+        service and nothing was printed to a terminal
+
+    Exits non-zero if the key file is missing — there's nothing useful
+    to print and scripts can branch on the status code."""
+    cfg = DashboardConfig.from_env()
+    key = cfg.read_api_key()
+    if not key:
+        typer.echo(
+            "No API key on disk — start getbased-rag first so it can "
+            f"generate one. Expected at: {cfg.api_key_file}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.echo(f"http://{cfg.host}:{cfg.port}/?key={key}")

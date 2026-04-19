@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import platform
 import shutil
 import sys
 import time
@@ -20,6 +21,7 @@ from typing import Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 
+from .. import __version__ as _PKG_VERSION
 from ..config import DashboardConfig
 from ..server import _require_auth
 
@@ -87,6 +89,18 @@ def _mcp_command_path() -> str:
     return found or "getbased-mcp"
 
 
+def _claude_desktop_path() -> str:
+    """OS-appropriate path to claude_desktop_config.json. Users otherwise
+    have to Google where it lives on their platform; showing the absolute
+    path inline removes that detour."""
+    sys_name = platform.system().lower()
+    if sys_name == "darwin":
+        return "~/Library/Application Support/Claude/claude_desktop_config.json"
+    if sys_name == "windows":
+        return "%APPDATA%\\Claude\\claude_desktop_config.json"
+    return "~/.config/Claude/claude_desktop_config.json"
+
+
 def _config_for_client(
     client: str,
     cfg: DashboardConfig,
@@ -129,12 +143,31 @@ def _config_for_client(
             }
         }
         filenames = {
-            "claude-desktop": "claude_desktop_config.json",
-            "claude-code": ".mcp.json (project) or ~/.claude.json (user)",
-            "cursor": ".cursor/mcp.json",
-            "cline": ".vscode/settings.json → cline.mcpServers",
+            "claude-desktop": _claude_desktop_path(),
+            "claude-code": ".mcp.json (in your project) or ~/.claude.json (user-wide)",
+            "cursor": "~/.cursor/mcp.json (or .cursor/mcp.json in your project)",
+            "cline": "VS Code Settings JSON → cline.mcpServers",
         }
         return filenames[client], json.dumps(body, indent=2)
+
+    if client == "openclaw":
+        # OpenClaw nests servers under `mcp.servers.<name>` (not the
+        # `mcpServers` convention Anthropic's clients use). Same
+        # command/args/env stdio shape inside. Users can either paste
+        # into ~/.openclaw/openclaw.json or install via the CLI:
+        #   openclaw mcp set getbased '<json-value-below>'
+        body = {
+            "mcp": {
+                "servers": {
+                    "getbased": {
+                        "command": mcp_cmd,
+                        "args": [],
+                        "env": env_block,
+                    }
+                }
+            }
+        }
+        return "~/.openclaw/openclaw.json", json.dumps(body, indent=2)
 
     if client == "hermes":
         # Hermes uses YAML and supports per-server tool allowlists via
@@ -161,7 +194,7 @@ def _config_for_client(
         status_code=400,
         detail=(
             f"Unknown client '{client}'. Supported: "
-            "claude-desktop, claude-code, cursor, cline, hermes"
+            "claude-desktop, claude-code, cursor, cline, hermes, openclaw"
         ),
     )
 
@@ -228,7 +261,7 @@ async def _stdio_probe(cfg: DashboardConfig, timeout_s: float = 10.0) -> dict:
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "getbased-dashboard", "version": "0.1.0"},
+                "clientInfo": {"name": "getbased-dashboard", "version": _PKG_VERSION},
             },
         }
         req_initialized = {"jsonrpc": "2.0", "method": "notifications/initialized"}
@@ -307,7 +340,7 @@ def register(app: FastAPI) -> None:
     async def generate_config(
         request: Request,
         client: Literal[
-            "claude-desktop", "claude-code", "cursor", "cline", "hermes"
+            "claude-desktop", "claude-code", "cursor", "cline", "hermes", "openclaw"
         ] = "claude-desktop",
     ):
         cfg = _cfg(request)

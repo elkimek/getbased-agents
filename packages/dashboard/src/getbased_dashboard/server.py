@@ -11,6 +11,7 @@ know what you're doing.
 
 from __future__ import annotations
 
+import platform as _platform
 import secrets
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import __version__ as _PKG_VERSION
 from .config import DashboardConfig
 
 _WEB_DIR = Path(__file__).parent / "web"
@@ -53,7 +55,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     app = FastAPI(
         title="getbased-dashboard",
         description="Web UI for getbased-agents.",
-        version="0.1.0",
+        version=_PKG_VERSION,
     )
     app.state.config = cfg
 
@@ -114,10 +116,15 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         rag look wired up?' state before the user has entered a key."""
         return {
             "ok": True,
-            "version": "0.1.0",
+            "version": _PKG_VERSION,
             "lens_url": cfg.lens_url,
             "has_api_key": bool(cfg.read_api_key()),
             "api_key_file": str(cfg.api_key_file),
+            # OS hint so the frontend can show platform-appropriate
+            # absolute paths in the MCP config filename hints — users
+            # otherwise have to guess where `claude_desktop_config.json`
+            # actually lives on their system.
+            "platform": _platform.system().lower(),
         }
 
     @app.get("/api/auth/check")

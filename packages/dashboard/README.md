@@ -18,7 +18,7 @@ Three tabs, single auth gate, one pill for ingest progress that lives outside th
 
 ### MCP tab
 - Env viewer showing what a spawned MCP would see (`LENS_URL`, `LENS_API_KEY_FILE` + present/missing, `GETBASED_TOKEN` set/not set, module path). Tooltips explain the difference between "dashboard's env" and "client's MCP env block"
-- Config generator — emits paste-ready blocks for **Claude Desktop**, **Claude Code**, **Cursor**, **Cline**, **Hermes**. JSON for the first four, YAML with `enabled_tools` allowlist for Hermes. Copy-to-clipboard button.
+- Config generator — emits paste-ready blocks for **Claude Desktop**, **Claude Code**, **Cursor**, **Cline**, **Hermes**, **OpenClaw**. JSON `mcpServers.<name>` for the Anthropic-shape clients, YAML with `enabled_tools` allowlist for Hermes, JSON `mcp.servers.<name>` for OpenClaw. Copy-to-clipboard button.
 - "Test MCP" — spawns the real `getbased-mcp` binary via stdio, runs `initialize` + `tools/list`, returns elapsed ms + tool names
 
 ### Activity tab
@@ -84,8 +84,27 @@ The dashboard holds no data. Delete it and your knowledge base is untouched.
 ## CLI
 
 ```
-getbased-dashboard serve      Start the web server
-getbased-dashboard info       Show resolved config + whether the rag key is on disk
+getbased-dashboard serve       Start the web server. Prints a one-click
+                               `?key=…` login URL tagged [LOGIN-URL] so
+                               users don't need to copy-paste the bearer
+                               out of the terminal.
+
+getbased-dashboard login-url   Re-print the magic login URL on demand.
+                               Use this after closing the original
+                               `serve` terminal or when running as a
+                               systemd / launchd service. Exits non-zero
+                               if no key is on disk.
+
+getbased-dashboard info        Show resolved config + whether the rag
+                               key is on disk. Never echoes the key
+                               itself — safe to paste into a bug report.
+```
+
+When running under systemd, the login URL is also grep-able in the
+service logs:
+
+```
+journalctl --user -u getbased-dashboard | grep LOGIN-URL
 ```
 
 ---

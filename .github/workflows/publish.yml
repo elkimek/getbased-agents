@@ -1,0 +1,78 @@
+name: Publish to PyPI
+
+# Fires on any tag of the form `v*` (e.g. `v0.7.0`, `dashboard-v0.6.0`).
+# We build every package's wheel and attempt to upload all four; if a
+# version already exists on PyPI, `skip-existing: true` makes that a
+# no-op instead of a failure. So re-tagging the same release is safe,
+# and bumping one package's version doesn't force the others to bump.
+#
+# PREREQUISITE: each of the four projects needs a Trusted Publisher
+# registered on PyPI with:
+#   Owner:       elkimek
+#   Repository:  getbased-agents
+#   Workflow:    publish.yml
+#   Environment: pypi
+# (https://pypi.org/manage/project/<name>/settings/publishing/)
+on:
+  push:
+    tags:
+      - "v*"
+      - "*-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/getbased-agent-stack
+    permissions:
+      # Required for OIDC so PyPI can mint a short-lived token.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      # Build each project into its own dist subdir. The pypa publish
+      # action uploads everything in `packages-dir`, and with Trusted
+      # Publishers the OIDC token it mints is scoped to a specific
+      # project — so mixing multiple projects' wheels in one dir would
+      # make PyPI reject the "wrong" ones. One subdir per project
+      # keeps every upload step single-project.
+      - name: Build all four wheels into per-project dirs
+        run: |
+          for pkg in mcp rag dashboard agent-stack; do
+            uv build --package "getbased-${pkg}" --out-dir "dist-${pkg}"
+          done
+          ls -la dist-*/
+
+      - name: Publish getbased-mcp
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-mcp
+          skip-existing: true
+
+      - name: Publish getbased-rag
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-rag
+          skip-existing: true
+
+      - name: Publish getbased-dashboard
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-dashboard
+          skip-existing: true
+
+      - name: Publish getbased-agent-stack
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-agent-stack
+          skip-existing: true

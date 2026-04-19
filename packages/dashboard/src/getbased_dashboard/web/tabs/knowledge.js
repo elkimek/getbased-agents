@@ -329,32 +329,65 @@ function renderEngineBadge() {
   // title so hover reveals it.
   const modelShort = model.includes("/") ? model.split("/").pop() : model;
 
+  // Keep the beginner-friendly summary row (engine · model · ready) at
+  // the top; tuck dim / floor / reranker into an Advanced <details>.
+  // They're critical when debugging embedder config, noise when skimming.
   const rerankerCell = _info.reranker
-    ? '<span class="engine-pill warn">reranker on</span>'
+    ? '<span class="engine-pill warn" title="A reranker is layered on top of the embedder — better quality at a small latency cost.">reranker on</span>'
     : "";
   const floorCell =
     _info.similarity_floor != null
-      ? `<span class="engine-cell">floor <strong>${_info.similarity_floor}</strong></span>`
+      ? `<span class="engine-cell" title="Passages below this cosine similarity aren't returned."><span class="engine-k">floor</span> <strong>${_info.similarity_floor}</strong></span>`
       : "";
   const loadedCell = loaded
-    ? '<span class="engine-pill ok">ready</span>'
-    : '<span class="engine-pill dim">cold</span>';
+    ? '<span class="engine-pill ok" title="Embedder is loaded in memory and ready to answer searches instantly.">ready</span>'
+    : '<span class="engine-pill dim" title="Embedder is idle. It will warm up on the next search.">cold</span>';
+
+  const hasAdvanced = dim != null || floorCell || rerankerCell;
+  const advancedBlock = hasAdvanced
+    ? `
+      <details class="engine-advanced">
+        <summary>Advanced</summary>
+        <div class="engine-advanced-body">
+          ${dim != null ? `<span class="engine-cell" title="Vector dimension — libraries are pinned to this and can't mix models."><span class="engine-k">dim</span> <strong>${dim}</strong></span>` : ""}
+          ${floorCell}
+          ${rerankerCell}
+        </div>
+      </details>
+    `
+    : "";
 
   return `
     <div class="engine-strip" title="${esc(model)}">
       <span class="engine-cell"><span class="engine-k">engine</span> <strong>${esc(engineLabel)}</strong></span>
       <span class="engine-cell"><span class="engine-k">model</span> <strong>${esc(modelShort)}</strong></span>
-      <span class="engine-cell"><span class="engine-k">dim</span> <strong>${dim != null ? dim : "—"}</strong></span>
-      ${floorCell}
-      ${rerankerCell}
       ${loadedCell}
+      ${advancedBlock}
     </div>
   `;
+}
+
+function _activeLib() {
+  const libs = _libraries.libraries || [];
+  return libs.find((l) => l.id === _libraries.activeId) || null;
+}
+
+function _syncActiveLibChip() {
+  // Drives the header chip across tabs. Hidden when no library exists
+  // or none is active.
+  const lib = _activeLib();
+  if (window.dashboard && typeof window.dashboard.setActiveLibrary === "function") {
+    window.dashboard.setActiveLibrary(lib ? lib.name : "");
+  }
 }
 
 function renderLibraries(root) {
   const libs = _libraries.libraries || [];
   const active = _libraries.activeId;
+  const activeLib = _activeLib();
+  const hasLibs = libs.length > 0;
+  const hasSources = (_stats.documents || []).length > 0;
+  const hasAnything = hasLibs && hasSources;
   const rows = libs
     .map((lib) => {
       const isActive = lib.id === active;
@@ -418,8 +451,61 @@ function renderLibraries(root) {
     )
     .join("");
 
+  // Fresh install with zero libraries — big friendly "get started"
+  // block instead of a whisper-small empty-state italic. Converts a
+  // user from "I signed in, now what?" to ingest in < 60 seconds.
+  const onboardingCard = !hasLibs
+    ? `
+      <section class="panel onboarding-card">
+        <div class="onboarding-head">
+          <h2>Welcome — let's get your first library going</h2>
+          <p class="dim">Three quick steps. You'll be searching your own documents in under a minute.</p>
+        </div>
+        <ol class="onboarding-steps">
+          <li>
+            <div class="step-num">1</div>
+            <div>
+              <strong>Name your first library.</strong>
+              Pick something descriptive — <em>Research papers</em>, <em>Clinical notes</em>, <em>Nutrition</em>.
+              The model you choose here is locked in for that library's lifetime.
+            </div>
+          </li>
+          <li>
+            <div class="step-num">2</div>
+            <div>
+              <strong>Drop files in.</strong>
+              PDFs, Markdown, text, and docx are all supported, plus zip archives containing those.
+            </div>
+          </li>
+          <li>
+            <div class="step-num">3</div>
+            <div>
+              <strong>Connect an agent.</strong>
+              Hop over to the <button type="button" class="link" data-link-tab="mcp">MCP tab</button>, pick your client, copy the config.
+            </div>
+          </li>
+        </ol>
+      </section>
+    `
+    : "";
+
+  // Name the active library in the ingest-panel copy so a user can't
+  // accidentally drop into the wrong corpus after switching libraries.
+  const ingestSub = hasLibs
+    ? activeLib
+      ? `Drop files into <strong>${esc(activeLib.name)}</strong> <span class="dim">(active library)</span>`
+      : `<span class="dim">Activate a library above first — the drop zone ingests into whichever is active.</span>`
+    : `<span class="dim">Create a library above first.</span>`;
+
+  // Sources panel shows its library by name too, so "Delete all" is
+  // unambiguous about scope.
+  const sourcesHeading = activeLib
+    ? `Sources in <em>${esc(activeLib.name)}</em>`
+    : "Sources";
+
   root.innerHTML = `
     ${renderEngineBadge()}
+    ${onboardingCard}
     <section class="panel">
       <div class="panel-head">
         <h2>Libraries</h2>
@@ -429,23 +515,23 @@ function renderLibraries(root) {
           <button type="submit">Create</button>
         </form>
       </div>
-      <p class="panel-sub" style="margin: -4px 0 12px">Each library is pinned to its model at creation — vectors are dim-locked and can't be switched later.</p>
-      <ul class="lib-list">${rows || '<li class="empty">No libraries yet — create one above to get started.</li>'}</ul>
+      <p class="panel-sub" style="margin: -4px 0 12px">Each library is locked to its embedding model at creation — vectors are tied to that model's format and libraries can't be migrated later.</p>
+      <ul class="lib-list">${rows || '<li class="empty">No libraries yet — use the form above to create one.</li>'}</ul>
     </section>
 
     <section class="panel">
       <div class="panel-head">
         <h2>Ingest</h2>
-        <div class="panel-sub">Drop files into the active library</div>
+        <div class="panel-sub">${ingestSub}</div>
       </div>
-      <div id="drop-zone" class="drop-zone">
+      <div id="drop-zone" class="drop-zone ${!hasLibs || !activeLib ? "disabled" : ""}" ${!hasLibs || !activeLib ? "aria-disabled='true'" : ""}>
         <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="17 8 12 3 7 8" />
           <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
         <p>Drag &amp; drop files here, or <button type="button" id="pick-files-btn" class="link">pick files</button></p>
-        <p class="drop-hint">.md · .txt · .markdown · .rst · .pdf · .docx · .zip</p>
+        <p class="drop-hint">PDFs, Markdown, text, docx, and zip archives</p>
         <input type="file" id="file-input" class="visually-hidden" multiple />
       </div>
     </section>
@@ -462,8 +548,8 @@ function renderLibraries(root) {
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Sources (active library)</h2>
-        ${(_stats.documents || []).length
+        <h2>${sourcesHeading}</h2>
+        ${hasSources
           ? `<button id="clear-sources" class="ghost danger" type="button">Delete all</button>`
           : ""}
       </div>
@@ -472,6 +558,7 @@ function renderLibraries(root) {
     </section>
   `;
 
+  _syncActiveLibChip();
   wireHandlers(root);
 }
 
@@ -653,6 +740,16 @@ function wireHandlers(root) {
   root
     .querySelector("#pick-files-btn")
     .addEventListener("click", () => input.click());
+
+  // Onboarding card's "MCP tab" link switches tabs programmatically.
+  root.querySelectorAll("[data-link-tab]").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const target = a.dataset.linkTab;
+      const btn = document.querySelector(`.tab[data-tab="${target}"]`);
+      if (btn) btn.click();
+    });
+  });
 }
 
 export async function render(root) {

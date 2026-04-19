@@ -8,22 +8,84 @@
 </head>
 <body>
   <header class="app-header">
-    <h1>getbased</h1>
+    <div class="app-brand">
+      <h1>getbased</h1>
+      <div class="app-subtitle">Agent stack dashboard</div>
+    </div>
     <nav class="tabs">
-      <button class="tab active" data-tab="knowledge">Knowledge</button>
-      <button class="tab" data-tab="mcp">MCP</button>
-      <button class="tab" data-tab="activity">Activity</button>
+      <button class="tab active" data-tab="knowledge" title="Manage knowledge libraries, ingest files, search">Knowledge</button>
+      <button class="tab" data-tab="mcp" title="Model Context Protocol — generate config to plug this server into Claude Code, Cursor, Hermes, OpenClaw, etc.">MCP</button>
+      <button class="tab" data-tab="activity" title="Live feed and per-tool stats for calls your agents make">Activity</button>
     </nav>
-    <div class="status" id="connection-status">checking…</div>
+    <div class="app-header-trail">
+      <span class="active-lib-chip" id="active-lib-chip" hidden></span>
+      <button
+        class="theme-toggle"
+        id="theme-toggle"
+        type="button"
+        title="Toggle theme"
+        aria-label="Toggle theme">
+        <span class="theme-icon-dark">☾</span>
+        <span class="theme-icon-light">☀</span>
+      </button>
+      <a
+        class="docs-link"
+        id="docs-link"
+        href="https://github.com/elkimek/getbased-agents#readme"
+        target="_blank"
+        rel="noopener"
+        title="Open the getbased-agents docs in a new tab"
+        aria-label="Docs">?</a>
+      <div class="status" id="connection-status">checking…</div>
+    </div>
   </header>
+
+  <div id="rag-banner" class="banner" hidden>
+    <div class="banner-body">
+      <strong>No rag key on disk.</strong>
+      <span>Start the rag server so it can write its key file:</span>
+      <code>getbased-rag serve</code>
+      <span>Once it's running, reload this page.</span>
+    </div>
+  </div>
 
   <main id="app">
     <section id="auth-gate" hidden>
-      <h2>Enter your API key</h2>
-      <p>Paste the bearer key from <code>$XDG_DATA_HOME/getbased/lens/api_key</code>.</p>
-      <input type="password" id="api-key-input" placeholder="Bearer token" autocomplete="off">
-      <button id="save-key">Save</button>
+      <h2>Sign in</h2>
+      <p class="auth-lede">
+        This key secures the dashboard's connection to your local rag server. It was generated on first run.
+      </p>
+      <label for="api-key-input" class="auth-label">Bearer key</label>
+      <div class="auth-input-row">
+        <input type="password" id="api-key-input" placeholder="Paste your key" autocomplete="off" autofocus>
+        <button type="button" id="toggle-key-visibility" class="ghost" title="Show / hide key" aria-label="Show / hide key">show</button>
+      </div>
+      <button id="save-key">Sign in</button>
       <p class="err" id="auth-error"></p>
+
+      <details class="auth-help">
+        <summary>I don't have my key</summary>
+        <div class="auth-help-body">
+          <p>Run one of these on the machine hosting the dashboard:</p>
+          <div class="auth-cmd">
+            <code>getbased-dashboard login-url</code>
+            <button type="button" class="ghost mini-copy" data-auth-copy="getbased-dashboard login-url">copy</button>
+          </div>
+          <p class="auth-help-note">
+            It prints a one-click URL — paste it into the address bar and you're in. No key to copy.
+          </p>
+          <p class="auth-help-note">
+            Running under systemd? The same URL is tagged <code>[LOGIN-URL]</code> in the service logs:
+          </p>
+          <div class="auth-cmd">
+            <code>journalctl --user -u getbased-dashboard | grep LOGIN-URL</code>
+            <button type="button" class="ghost mini-copy" data-auth-copy="journalctl --user -u getbased-dashboard | grep LOGIN-URL">copy</button>
+          </div>
+          <p class="auth-help-note">
+            Or read the key file directly: <code id="auth-key-path">(detecting…)</code>
+          </p>
+        </div>
+      </details>
     </section>
     <section id="tab-knowledge" class="tab-panel" hidden></section>
     <section id="tab-mcp" class="tab-panel" hidden></section>
