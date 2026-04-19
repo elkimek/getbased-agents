@@ -98,8 +98,8 @@ async function loadEnv(root) {
       <div class="kv-v"><code>${esc(e.lens_api_key_file)}</code> ${e.lens_api_key_present ? '<span class="badge ok">present</span>' : '<span class="badge err">missing</span>'}</div>
       <div class="kv-k">GETBASED_GATEWAY</div>
       <div class="kv-v"><code>${esc(e.getbased_gateway)}</code></div>
-      <div class="kv-k">GETBASED_TOKEN</div>
-      <div class="kv-v">${e.getbased_token_present ? '<span class="badge ok">set</span>' : '<span class="badge err">not set — configure via client env</span>'}</div>
+      <div class="kv-k" title="The MCP reads GETBASED_TOKEN from the env of whatever launches it (Claude Desktop, Hermes, Claude Code, etc). This row reflects the dashboard's own env — i.e. what a locally-spawned MCP would inherit. In production, the token goes in the client's config file, not here.">GETBASED_TOKEN</div>
+      <div class="kv-v">${e.getbased_token_present ? '<span class="badge ok">set</span>' : '<span class="badge err" title="Empty in the dashboard\'s env. This is expected when running locally without the sync gateway — the token normally lives in your AI client\'s MCP config block, not here.">not set — configure via client env</span>'}</div>
       <div class="kv-k">MCP module</div>
       <div class="kv-v"><code>${esc(e.mcp_module_path)}</code></div>
     `;

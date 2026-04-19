@@ -436,7 +436,12 @@ function renderLibraries(root) {
     </section>
 
     <section class="panel">
-      <div class="panel-head"><h2>Sources (active library)</h2></div>
+      <div class="panel-head">
+        <h2>Sources (active library)</h2>
+        ${(_stats.documents || []).length
+          ? `<button id="clear-sources" class="ghost danger" type="button">Delete all</button>`
+          : ""}
+      </div>
       <div class="stat-total">Total chunks: ${_stats.total_chunks}</div>
       <ul class="src-list">${sourceRows || '<li class="empty">No sources indexed yet.</li>'}</ul>
     </section>
@@ -520,6 +525,31 @@ function wireHandlers(root) {
       }
     });
   });
+
+  // Delete-all sources — nukes the active library's chunks but keeps
+  // the library itself. Rendered only when there's something to nuke;
+  // see renderLibraries() for the conditional.
+  const clearSourcesBtn = root.querySelector("#clear-sources");
+  if (clearSourcesBtn) {
+    clearSourcesBtn.addEventListener("click", async () => {
+      const activeLib = (_libraries.libraries || []).find(
+        (l) => l.id === _libraries.activeId
+      );
+      const libName = activeLib ? activeLib.name : "the active library";
+      const n = _stats.total_chunks || 0;
+      const ok = await showConfirm(
+        `Drop all ${n.toLocaleString()} chunk${n === 1 ? "" : "s"} from "${libName}"? The library itself stays; only its indexed content is removed.`,
+        { okLabel: "Delete all", danger: true }
+      );
+      if (!ok) return;
+      try {
+        await j("/api/knowledge/sources", { method: "DELETE" });
+        render(root);
+      } catch (err) {
+        await showAlert(`Failed: ${err.message}`, { tone: "error" });
+      }
+    });
+  }
 
   // Search
   root.querySelector("#search-form").addEventListener("submit", async (e) => {

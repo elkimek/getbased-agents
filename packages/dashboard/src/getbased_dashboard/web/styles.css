@@ -609,6 +609,7 @@ button.ghost {
   font-family: inherit;
 }
 button.ghost:hover { color: var(--text); border-color: var(--text-dim); }
+button.ghost.danger:hover { color: var(--danger); border-color: var(--danger); }
 
 .badge.err { color: var(--danger); border-color: var(--danger); }
 
