@@ -516,9 +516,31 @@ def create_embedder(config: LensConfig) -> Embedder:
 
 
 def _onnx_available() -> bool:
-    """Check if onnxruntime is importable."""
+    """ONNX path needs BOTH onnxruntime AND optimum (for the HF model
+    loader). Checking onnxruntime alone isn't enough — users who have
+    it for other reasons but lack optimum would hit the ONNX branch
+    and crash on import. Defensive check keeps the factory stable when
+    the environment is partially-provisioned.
+
+    optimum ≥ 2.0 removed `ORTModelForFeatureExtraction` which
+    OnnxEmbedder uses — treat 2.x as "not available" until embedder
+    is updated to the post-2.0 API. Users with 2.x installed will
+    quietly fall back to the sentence-transformers path instead of
+    crashing on model load.
+    """
     try:
         import onnxruntime  # noqa: F401
-        return True
     except ImportError:
         return False
+    try:
+        import optimum  # noqa: F401
+        # Version-gate: 2.x removed the API we use.
+        import importlib.metadata as _meta
+
+        ver = _meta.version("optimum")
+        major = int(ver.split(".", 1)[0])
+        if major >= 2:
+            return False
+    except (ImportError, Exception):
+        return False
+    return True
