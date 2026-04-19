@@ -478,9 +478,10 @@ wheels = [
 
 [[package]]
 name = "getbased-agent-stack"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/stack" }
 dependencies = [
+    { name = "getbased-dashboard" },
     { name = "getbased-mcp" },
     { name = "getbased-rag" },
 ]
@@ -497,6 +498,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "getbased-dashboard", editable = "packages/dashboard" },
     { name = "getbased-mcp", editable = "packages/mcp" },
     { name = "getbased-rag", editable = "packages/rag" },
     { name = "getbased-rag", extras = ["full"], marker = "extra == 'full'", editable = "packages/rag" },
@@ -508,7 +510,7 @@ provides-extras = ["full", "test"]
 
 [[package]]
 name = "getbased-dashboard"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/dashboard" }
 dependencies = [
     { name = "fastapi" },
@@ -544,7 +546,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "getbased-mcp"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "httpx" },
@@ -570,7 +572,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "getbased-rag"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/rag" }
 dependencies = [
     { name = "fastapi" },

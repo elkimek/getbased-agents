@@ -51,8 +51,15 @@ LENS_API_KEY_FILE = os.environ.get("LENS_API_KEY_FILE", _resolve_default_key_fil
 # expose (old lens, pre-libraries). See _lens_call's 404 handling.
 _UNSUPPORTED_LENS_HINT = (
     "this lens server doesn't expose library management. "
-    "Upgrade to getbased-rag ≥ 0.1.0, or point LENS_URL at a library-capable lens."
+    "Upgrade to getbased-rag ≥ 0.2.0, or point LENS_URL at a library-capable lens."
 )
+
+# Cap on how much of an upstream error body we echo back to the AI client.
+# Rag's exception_handler emits its own {error: ...} payload — safe in a
+# self-hosted trust model, but that error often ends up in a cloud LLM's
+# context window where the full response text (stack traces, file paths)
+# would be sensitive. Truncate to a short hint.
+_UPSTREAM_ERROR_PREVIEW = 200
 
 
 # ── Activity logging ────────────────────────────────────────────────
@@ -197,9 +204,12 @@ async def _lens_request(query: str, top_k: int = 5) -> dict:
     except httpx.ConnectError:
         return {"error": f"Lens server not reachable at {LENS_URL}. Is it running?"}
     except httpx.HTTPStatusError as e:
-        # Note: response text may contain server-side details (stack traces, DB errors)
-        # Acceptable for self-hosted trust model — operator owns both ends
-        return {"error": f"Lens returned {e.response.status_code}: {e.response.text}"}
+        # The error surfaces into an AI client (typically cloud-hosted),
+        # so don't forward the raw response text — it may contain internal
+        # paths or stack traces. Truncate to a short preview; if an
+        # operator needs more detail they have the lens logs.
+        preview = (e.response.text or "")[:_UPSTREAM_ERROR_PREVIEW]
+        return {"error": f"Lens returned {e.response.status_code}: {preview}"}
     except httpx.RequestError as e:
         return {"error": f"Lens request failed: {e}"}
     except (json.JSONDecodeError, ValueError) as e:
@@ -238,7 +248,10 @@ async def _lens_call(method: str, path: str, json_body: dict | None = None) -> d
                     return {"error": "unsupported_endpoint"}
             except (json.JSONDecodeError, ValueError):
                 pass
-        return {"error": f"Lens returned {e.response.status_code}: {e.response.text}"}
+        # Same rationale as _lens_request: truncate the body preview so
+        # internal details don't end up in a cloud AI client's context.
+        preview = (e.response.text or "")[:_UPSTREAM_ERROR_PREVIEW]
+        return {"error": f"Lens returned {e.response.status_code}: {preview}"}
     except httpx.RequestError as e:
         return {"error": f"Lens request failed: {e}"}
     except (json.JSONDecodeError, ValueError) as e:
@@ -336,8 +349,6 @@ async def getbased_list_profiles() -> str:
 async def knowledge_search(
     query: str,
     n_results: int = 5,
-    series: str = "",
-    claim_type: str = "",
 ) -> str:
     """Search the knowledge base for relevant passages using semantic similarity.
 
@@ -346,26 +357,15 @@ async def knowledge_search(
     list them with `knowledge_list_libraries` and switch with
     `knowledge_activate_library` before searching.
 
-    Returns passages from curated health and biology research, organized by
-    series and claim type. Use this when the user asks about mechanisms,
-    causal relationships, or prescriptive guidance related to health topics.
+    Returns the top-K passages ranked by relevance, with source
+    attribution. Use this when the user asks about mechanisms, causal
+    relationships, or prescriptive guidance related to health topics.
 
     Args:
         query: Natural language search query (e.g. "folic acid MTHFR methylation")
         n_results: Number of results to return (default 5, max 10)
-        series: Filter to a specific series (e.g. "Decentralized Medicine", "CPC").
-            Currently no-op — placeholder for future Lens metadata filtering.
-            Filter client-side from results if needed.
-        claim_type: Filter to claim type: mechanism, causal, prescriptive, speculative, general.
-            Currently no-op — placeholder for future Lens metadata filtering.
-            Filter client-side from results if needed.
     """
     n_results = max(1, min(10, n_results))
-
-    # TODO: series/claim_type filtering — pass to Lens when it supports metadata filters
-    # Currently Lens returns top-k by relevance only. Filter client-side as needed.
-    _ = series, claim_type  # acknowledge params until Lens supports them
-
     data = await _lens_request(query, top_k=n_results)
 
     if "error" in data:

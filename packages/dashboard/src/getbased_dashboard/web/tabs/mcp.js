@@ -9,11 +9,21 @@
 
 import { authed } from "../app.js";
 
+function _errMessage(body, status, statusText) {
+  const raw = (body && (body.error ?? body.detail)) ?? `HTTP ${status}`;
+  if (typeof raw === "string") return raw;
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return statusText || `HTTP ${status}`;
+  }
+}
+
 async function j(path, opts = {}) {
   const r = await authed(path, opts);
   if (!r.ok) {
-    const err = await r.json().catch(() => ({ detail: r.statusText }));
-    throw new Error(err.detail || err.error || `HTTP ${r.status}`);
+    const body = await r.json().catch(() => null);
+    throw new Error(_errMessage(body, r.status, r.statusText));
   }
   return r.json();
 }
@@ -140,7 +150,19 @@ async function runTest(root) {
 function wireHandlers(root) {
   root.querySelector("#refresh-env").addEventListener("click", () => loadEnv(root));
   root.querySelector("#client-picker").addEventListener("change", () => loadConfig(root));
-  root.querySelector("#run-test").addEventListener("click", () => runTest(root));
+  // Guard against rapid double-clicks spawning two MCP subprocesses
+  // concurrently — each spawn is ~500ms and pays a startup cost, so
+  // letting users queue them up achieves nothing useful.
+  const testBtn = root.querySelector("#run-test");
+  testBtn.addEventListener("click", async () => {
+    if (testBtn.disabled) return;
+    testBtn.disabled = true;
+    try {
+      await runTest(root);
+    } finally {
+      testBtn.disabled = false;
+    }
+  });
   root.querySelector("#copy-cfg").addEventListener("click", async () => {
     const text = root.querySelector("#cfg-body").textContent;
     try {

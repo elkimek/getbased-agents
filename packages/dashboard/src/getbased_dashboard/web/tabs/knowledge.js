@@ -12,11 +12,30 @@ import { authed } from "../app.js";
 let _libraries = { activeId: "", libraries: [] };
 let _stats = { total_chunks: 0, documents: [] };
 
+// Ingest status survives across re-renders so the "Indexed N chunks"
+// confirmation doesn't flash and disappear. Cleared when the tab is
+// re-entered from scratch or when a new ingest starts.
+let _lastIngest = null; // { text: string, cls: "ok" | "err" | "" }
+
+function _errMessage(body, status, statusText) {
+  // Dashboard's exception_handler normalises to {error: "..."}. Fall back
+  // to a stringified shape for old-path / upstream JSON that didn't go
+  // through our handler. Crucially, never let an object slip through
+  // unstringified — `new Error({foo: 1})` renders as "[object Object]".
+  const raw = (body && (body.error ?? body.detail)) ?? `HTTP ${status}`;
+  if (typeof raw === "string") return raw;
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return statusText || `HTTP ${status}`;
+  }
+}
+
 async function j(path, opts = {}) {
   const r = await authed(path, opts);
   if (!r.ok) {
-    const err = await r.json().catch(() => ({ detail: r.statusText }));
-    throw new Error(err.detail || err.error || `HTTP ${r.status}`);
+    const body = await r.json().catch(() => null);
+    throw new Error(_errMessage(body, r.status, r.statusText));
   }
   return r.json();
 }
@@ -113,19 +132,31 @@ function renderLibraries(root) {
 }
 
 function wireHandlers(root) {
-  // Library mutations
-  root.querySelector("#create-lib").addEventListener("submit", async (e) => {
+  // Library mutations — submit-in-flight guard prevents rapid double-clicks
+  // producing duplicate libraries (the server happily creates two with the
+  // same name otherwise).
+  const createForm = root.querySelector("#create-lib");
+  const createBtn = createForm.querySelector("button[type=submit]");
+  createForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (createBtn.disabled) return;
     const name = new FormData(e.target).get("name").toString().trim();
     if (!name) return;
-    await safeMutate(() =>
-      j("/api/knowledge/libraries", {
+    createBtn.disabled = true;
+    try {
+      await j("/api/knowledge/libraries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
-      })
-    );
-    render(root);
+      });
+      await render(root);
+    } catch (err) {
+      alert(`Failed: ${err.message}`);
+    } finally {
+      // Button is replaced by render() on success — this just handles the
+      // error path where the same DOM stays.
+      if (createBtn.isConnected) createBtn.disabled = false;
+    }
   });
 
   root.querySelectorAll("[data-act]").forEach((btn) => {
@@ -204,25 +235,39 @@ function wireHandlers(root) {
   const input = root.querySelector("#file-input");
   const status = root.querySelector("#ingest-status");
 
+  // Re-apply any persistent status from a prior ingest so the "Indexed N
+  // chunks" confirmation survives the re-render that refreshes the
+  // sources list underneath it.
+  if (_lastIngest) {
+    status.textContent = _lastIngest.text;
+    status.className = `ingest-status ${_lastIngest.cls}`;
+  }
+
+  function setStatus(text, cls) {
+    _lastIngest = { text, cls };
+    status.textContent = text;
+    status.className = `ingest-status ${cls}`;
+  }
+
   async function doIngest(fileList) {
     if (!fileList || !fileList.length) return;
     const fd = new FormData();
     for (const f of fileList) fd.append("files", f, f.name);
-    status.textContent = `Ingesting ${fileList.length} file(s)…`;
-    status.className = "ingest-status";
+    setStatus(`Ingesting ${fileList.length} file(s)…`, "");
     try {
       const out = await authed("/api/knowledge/ingest", { method: "POST", body: fd });
       if (!out.ok) {
-        const err = await out.json().catch(() => ({ detail: out.statusText }));
-        throw new Error(err.detail || err.error || `HTTP ${out.status}`);
+        const body = await out.json().catch(() => null);
+        throw new Error(_errMessage(body, out.status, out.statusText));
       }
       const result = await out.json();
-      status.textContent = `Indexed ${result.chunks_indexed} chunk(s) from ${result.files_seen} file(s). Skipped: ${(result.skipped || []).length}`;
-      status.className = "ingest-status ok";
-      render(root);
+      setStatus(
+        `Indexed ${result.chunks_indexed} chunk(s) from ${result.files_seen} file(s). Skipped: ${(result.skipped || []).length}`,
+        "ok"
+      );
+      render(root);  // sources list refresh — preserved status re-applies
     } catch (err) {
-      status.textContent = `Failed: ${err.message}`;
-      status.className = "ingest-status err";
+      setStatus(`Failed: ${err.message}`, "err");
     }
   }
 
@@ -240,15 +285,6 @@ function wireHandlers(root) {
   );
   dz.addEventListener("drop", (e) => doIngest(e.dataTransfer.files));
   input.addEventListener("change", () => doIngest(input.files));
-}
-
-async function safeMutate(fn) {
-  try {
-    await fn();
-  } catch (err) {
-    alert(`Failed: ${err.message}`);
-    throw err;
-  }
 }
 
 export async function render(root) {

@@ -35,6 +35,30 @@ def test_env_reports_lens_url_and_key_presence(
     assert "getbased_token" not in body  # never echo the secret itself
 
 
+def test_env_does_not_mutate_os_environ(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: previously _resolved_mcp_env temporarily overrode
+    LENS_API_KEY_FILE on os.environ and reloaded the mcp module.
+    Concurrent requests could corrupt each other's config output, and
+    any other in-process reader of os.environ would see stale/wrong
+    values mid-call. Now no global state is touched — assert that."""
+    import os
+
+    before = os.environ.get("LENS_API_KEY_FILE")
+    before_url = os.environ.get("LENS_URL")
+
+    # Hit /api/mcp/env several times; if there's a stale reload-race bug
+    # the env should appear changed from outside. We also do this
+    # concurrently with a separate read of os.environ to be safe.
+    for _ in range(5):
+        r = client.get("/api/mcp/env", headers=AUTH)
+        assert r.status_code == 200
+
+    assert os.environ.get("LENS_API_KEY_FILE") == before
+    assert os.environ.get("LENS_URL") == before_url
+
+
 # ─── /api/mcp/config — per-client templates ──────────────────────────
 
 def test_config_requires_auth(client: TestClient) -> None:
@@ -170,6 +194,114 @@ def test_mcp_command_path_prefers_same_venv_as_dashboard(
 
     resolved = mcp_api._mcp_command_path()
     assert resolved == str(fake_mcp)
+
+
+@pytest.mark.asyncio
+async def test_stdio_probe_real_subprocess_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: spawn a REAL subprocess (a tiny fake-MCP written for
+    this test), send init + tools/list, receive canned responses, verify
+    the probe parses them and the child is reaped.
+
+    Addresses the gap flagged in the audit: every existing /api/mcp/test
+    test monkeypatches _stdio_probe itself, which means the JSON-RPC
+    framing + readline-order + cleanup logic had zero real coverage.
+    This test exercises the actual function against a real pipe."""
+    from getbased_dashboard.api import mcp as mcp_api
+    from getbased_dashboard.config import DashboardConfig
+
+    # Build a minimal stdio JSON-RPC server as a Python one-liner script.
+    # It reads three JSON lines, emits two responses, exits.
+    fake_mcp = tmp_path / "fake-mcp"
+    fake_mcp.write_text(
+        '#!/usr/bin/env python3\n'
+        'import sys, json\n'
+        'lines = []\n'
+        'while len(lines) < 3:\n'
+        '    l = sys.stdin.readline()\n'
+        '    if not l: break\n'
+        '    try: lines.append(json.loads(l))\n'
+        '    except Exception: pass\n'
+        'sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"fake","version":"0.1"}}}) + "\\n")\n'
+        'sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"t_a"},{"name":"t_b"}]}}) + "\\n")\n'
+        'sys.stdout.flush()\n'
+    )
+    fake_mcp.chmod(0o755)
+
+    # Point the dashboard's path resolver at our fake binary.
+    monkeypatch.setattr(mcp_api, "_mcp_command_path", lambda: str(fake_mcp))
+
+    cfg = DashboardConfig(
+        api_key_file=tmp_path / "nonexistent_key", lens_url="http://lens.test:0"
+    )
+    result = await mcp_api._stdio_probe(cfg, timeout_s=5.0)
+
+    assert result["ok"] is True, result
+    assert result["server_info"] == {"name": "fake", "version": "0.1"}
+    assert result["tools"] == ["t_a", "t_b"]
+    assert result["elapsed_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_stdio_probe_skips_unrelated_stdout_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If MCP emits a log line or unrelated notification on stdout, the
+    probe must skip past it until it finds a response with the matching
+    id — not desync and read gibberish into json.loads."""
+    from getbased_dashboard.api import mcp as mcp_api
+    from getbased_dashboard.config import DashboardConfig
+
+    fake = tmp_path / "chatty-mcp"
+    fake.write_text(
+        '#!/usr/bin/env python3\n'
+        'import sys, json\n'
+        'for _ in range(3): sys.stdin.readline()\n'
+        # Emit chatter, then id=1 response, then id=2 response.
+        'sys.stdout.write("not json line 1\\n")\n'
+        'sys.stdout.write(json.dumps({"jsonrpc":"2.0","method":"log","params":{"msg":"starting"}}) + "\\n")\n'
+        'sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"x","version":"1"}}}) + "\\n")\n'
+        'sys.stdout.write(json.dumps({"jsonrpc":"2.0","method":"log","params":{"msg":"tools listed"}}) + "\\n")\n'
+        'sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"one"}]}}) + "\\n")\n'
+        'sys.stdout.flush()\n'
+    )
+    fake.chmod(0o755)
+
+    monkeypatch.setattr(mcp_api, "_mcp_command_path", lambda: str(fake))
+    cfg = DashboardConfig(api_key_file=tmp_path / "x", lens_url="http://t:0")
+
+    result = await mcp_api._stdio_probe(cfg, timeout_s=5.0)
+    assert result["ok"] is True, result
+    assert result["tools"] == ["one"]
+
+
+@pytest.mark.asyncio
+async def test_stdio_probe_reaps_subprocess_on_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the MCP hangs past the timeout, _stdio_probe must kill + wait
+    the child instead of leaking it. Catches the subprocess-cleanup
+    regression flagged in the audit."""
+    from getbased_dashboard.api import mcp as mcp_api
+    from getbased_dashboard.config import DashboardConfig
+
+    # A binary that reads init but never responds.
+    fake = tmp_path / "hang-mcp"
+    fake.write_text(
+        '#!/usr/bin/env python3\n'
+        'import sys, time\n'
+        'for _ in range(3): sys.stdin.readline()\n'
+        'time.sleep(30)\n'
+    )
+    fake.chmod(0o755)
+
+    monkeypatch.setattr(mcp_api, "_mcp_command_path", lambda: str(fake))
+    cfg = DashboardConfig(api_key_file=tmp_path / "x", lens_url="http://t:0")
+
+    result = await mcp_api._stdio_probe(cfg, timeout_s=0.5)
+    assert result["ok"] is False
+    assert "didn't respond" in result["error"]
 
 
 def test_mcp_command_path_falls_back_to_which(

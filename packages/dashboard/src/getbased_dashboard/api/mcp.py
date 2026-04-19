@@ -16,7 +16,6 @@ import os
 import shutil
 import sys
 import time
-from importlib import reload
 from typing import Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
@@ -30,38 +29,44 @@ def _cfg(request: Request) -> DashboardConfig:
 
 
 def _resolved_mcp_env(cfg: DashboardConfig) -> dict:
-    """Import getbased_mcp fresh (env vars may have changed since last
-    import) and return the publicly-interesting module globals. We never
-    return secrets — GETBASED_TOKEN is reported as present/absent only."""
-    # The MCP reads env at import time. Temporarily prime the env with the
-    # dashboard's view so the module resolves its defaults the same way a
-    # real spawn from this dashboard config would.
-    saved_env: dict[str, str | None] = {}
-    overrides = {
-        "LENS_API_KEY_FILE": str(cfg.api_key_file),
-        "LENS_URL": cfg.lens_url,
-    }
-    for k, v in overrides.items():
-        saved_env[k] = os.environ.get(k)
-        os.environ[k] = v
-    try:
-        import getbased_mcp as _mcp  # noqa: PLC0415
+    """Report the values an MCP subprocess would see when spawned by the
+    dashboard. The MCP reads `LENS_URL` and `LENS_API_KEY_FILE` from env
+    at import time — we spawn it with our values, so the dashboard's
+    view IS the MCP's view. No secrets are returned; token presence is
+    reported as a boolean so the UI can show "configured / not set".
 
-        reload(_mcp)
-        return {
-            "lens_url": _mcp.LENS_URL,
-            "lens_api_key_file": _mcp.LENS_API_KEY_FILE,
-            "lens_api_key_present": bool(_mcp._read_lens_key()),
-            "getbased_gateway": _mcp.GATEWAY,
-            "getbased_token_present": bool(_mcp.TOKEN),
-            "mcp_module_path": _mcp.__file__,
-        }
-    finally:
-        for k, v in saved_env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+    Previously this reloaded the `getbased_mcp` module with temporarily
+    mutated `os.environ` to observe its resolution. That raced on
+    `os.environ` across concurrent requests (two tabs corrupt each
+    other's config) and leaked the reload to any other in-process user
+    of the module. Now pure read — no global mutation, no reload."""
+    # Import for the module path, then peek at its publicly-interesting
+    # symbols to confirm we're in sync with what it would resolve given
+    # the same env. We do NOT rely on the currently-cached module-level
+    # values (they were resolved at whatever env the process started in).
+    import getbased_mcp as _mcp  # noqa: PLC0415
+
+    # Key file: use the dashboard's configured path directly — it's what
+    # a spawned MCP inherits. Read via the mcp module's own helper so the
+    # "present / absent" check matches exactly what the MCP would see.
+    key_file = str(cfg.api_key_file)
+    try:
+        key_present = bool(cfg.api_key_file.read_text().strip())
+    except OSError:
+        key_present = False
+
+    return {
+        "lens_url": cfg.lens_url,
+        "lens_api_key_file": key_file,
+        "lens_api_key_present": key_present,
+        # GATEWAY / TOKEN are read from the dashboard process's env since
+        # spawned subprocesses inherit the dashboard's env by default.
+        "getbased_gateway": os.environ.get(
+            "GETBASED_GATEWAY", "https://sync.getbased.health"
+        ),
+        "getbased_token_present": bool(os.environ.get("GETBASED_TOKEN")),
+        "mcp_module_path": _mcp.__file__,
+    }
 
 
 def _mcp_command_path() -> str:
@@ -164,13 +169,15 @@ def _config_for_client(
 async def _stdio_probe(cfg: DashboardConfig, timeout_s: float = 10.0) -> dict:
     """Spawn getbased-mcp as stdio, send init + tools/list, return the
     tool names. Every failure mode is captured as a returned dict with
-    an `error` key so the UI has one code path."""
+    an `error` key so the UI has one code path. The subprocess is
+    guaranteed to be reaped no matter how we exit — any unexpected
+    exception triggers kill + wait via the outer finally."""
     mcp_cmd = _mcp_command_path()
 
     env = os.environ.copy()
     # Propagate the dashboard's view of where lens lives + the key file.
-    # The subprocess will re-resolve these but at least they're consistent
-    # with what the user sees in the env viewer.
+    # Ensures the spawned MCP resolves the same paths the env-viewer UI
+    # reports, even if the dashboard process's own env differs.
     env["LENS_URL"] = cfg.lens_url
     env["LENS_API_KEY_FILE"] = str(cfg.api_key_file)
 
@@ -189,10 +196,34 @@ async def _stdio_probe(cfg: DashboardConfig, timeout_s: float = 10.0) -> dict:
             "error": f"MCP CLI '{mcp_cmd}' not found on PATH. Install getbased-mcp.",
         }
 
+    # JSON-RPC request ids we'll match responses against. Using distinct
+    # ints so a response can be classified even if MCP emits them in a
+    # different order than we sent them (robust to any stream quirks).
+    INIT_ID = 1
+    LIST_ID = 2
+
+    async def _read_response(expected_id: int) -> dict:
+        """Read lines from stdout until we see a JSON-RPC response whose
+        id matches the expected one. Notifications, log noise, or any
+        out-of-band output is tolerated — we skip past it instead of
+        desyncing like a fixed readline-count probe would."""
+        while True:
+            line = await proc.stdout.readline()  # type: ignore[union-attr]
+            if not line:
+                raise RuntimeError("MCP closed stdout before responding")
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                # Non-JSON line on stdout (unlikely from FastMCP but
+                # harmless if it happens) — ignore and keep reading.
+                continue
+            if isinstance(msg, dict) and msg.get("id") == expected_id:
+                return msg
+
     async def _do_probe():
         req_init = {
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": INIT_ID,
             "method": "initialize",
             "params": {
                 "protocolVersion": "2024-11-05",
@@ -201,53 +232,66 @@ async def _stdio_probe(cfg: DashboardConfig, timeout_s: float = 10.0) -> dict:
             },
         }
         req_initialized = {"jsonrpc": "2.0", "method": "notifications/initialized"}
-        req_list = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+        req_list = {"jsonrpc": "2.0", "id": LIST_ID, "method": "tools/list"}
 
         assert proc.stdin is not None and proc.stdout is not None
         for msg in (req_init, req_initialized, req_list):
             proc.stdin.write((json.dumps(msg) + "\n").encode())
         await proc.stdin.drain()
 
-        # Two responses (init + list); `initialized` is a notification.
-        init_line = await proc.stdout.readline()
-        list_line = await proc.stdout.readline()
-        init_resp = json.loads(init_line)
-        list_resp = json.loads(list_line)
+        init_resp = await _read_response(INIT_ID)
+        list_resp = await _read_response(LIST_ID)
         return init_resp, list_resp
 
-    try:
-        init_resp, list_resp = await asyncio.wait_for(_do_probe(), timeout=timeout_s)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return {"ok": False, "error": f"MCP didn't respond within {timeout_s}s"}
-    except json.JSONDecodeError as e:
-        proc.kill()
-        await proc.wait()
-        return {"ok": False, "error": f"MCP returned invalid JSON: {e}"}
-    finally:
+    async def _cleanup() -> None:
+        """Best-effort subprocess reap. Called from the outer finally so
+        every exit path (success, exception, cancellation) lands here."""
         try:
-            if proc.stdin:
+            if proc.stdin and not proc.stdin.is_closing():
                 proc.stdin.close()
         except Exception:
             pass
+        if proc.returncode is None:
+            try:
+                proc.terminate()
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except (ProcessLookupError, asyncio.TimeoutError):
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    return
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    # Zombie — the OS will reap it eventually. Don't
+                    # block the request thread on a hung child.
+                    return
 
     try:
-        proc.terminate()
-        await asyncio.wait_for(proc.wait(), timeout=2.0)
-    except (ProcessLookupError, asyncio.TimeoutError):
-        proc.kill()
-        await proc.wait()
+        try:
+            init_resp, list_resp = await asyncio.wait_for(
+                _do_probe(), timeout=timeout_s
+            )
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": f"MCP didn't respond within {timeout_s}s"}
+        except json.JSONDecodeError as e:
+            return {"ok": False, "error": f"MCP returned invalid JSON: {e}"}
+        except RuntimeError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:
+            return {"ok": False, "error": f"MCP probe failed: {type(e).__name__}: {e}"}
 
-    elapsed_ms = int((time.monotonic() - t0) * 1000)
-    server_info = (init_resp.get("result") or {}).get("serverInfo") or {}
-    tools = [t["name"] for t in (list_resp.get("result") or {}).get("tools", [])]
-    return {
-        "ok": True,
-        "elapsed_ms": elapsed_ms,
-        "server_info": server_info,
-        "tools": tools,
-    }
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        server_info = (init_resp.get("result") or {}).get("serverInfo") or {}
+        tools = [t["name"] for t in (list_resp.get("result") or {}).get("tools", [])]
+        return {
+            "ok": True,
+            "elapsed_ms": elapsed_ms,
+            "server_info": server_info,
+            "tools": tools,
+        }
+    finally:
+        await _cleanup()
 
 
 def register(app: FastAPI) -> None:

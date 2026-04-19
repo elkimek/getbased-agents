@@ -11,9 +11,11 @@ know what you're doing.
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -25,7 +27,8 @@ _WEB_DIR = Path(__file__).parent / "web"
 def _require_auth(request: Request, config: DashboardConfig) -> None:
     """Bearer check — same key rag + mcp use. Matches against the file
     on disk, not a cached copy, so rotating the key doesn't require a
-    dashboard restart."""
+    dashboard restart. Uses secrets.compare_digest to avoid timing-based
+    leakage — matches the pattern rag already uses."""
     key = config.read_api_key()
     if not key:
         raise HTTPException(
@@ -38,7 +41,8 @@ def _require_auth(request: Request, config: DashboardConfig) -> None:
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
-    if header[len("Bearer ") :].strip() != key:
+    token = header[len("Bearer ") :].strip()
+    if not secrets.compare_digest(token, key):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
@@ -52,6 +56,43 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         version="0.1.0",
     )
     app.state.config = cfg
+
+    # Normalise error envelopes to `{error: <string>}` so the frontend has
+    # one response shape to parse. rag uses the same convention; without
+    # this handler the dashboard would ship FastAPI's default
+    # `{detail: ...}` shape — and when detail is a list (Pydantic
+    # validation errors), `new Error(err.detail)` in the browser would
+    # render as "[object Object]".
+    def _flatten_detail(detail) -> str:
+        if isinstance(detail, str):
+            return detail
+        if isinstance(detail, list):
+            # Pydantic / FastAPI validation errors are a list of dicts with
+            # `msg` + `loc` fields. Concatenate into a human-readable line.
+            parts: list[str] = []
+            for item in detail:
+                if isinstance(item, dict):
+                    loc = ".".join(str(x) for x in item.get("loc", []))
+                    msg = item.get("msg", "invalid")
+                    parts.append(f"{loc}: {msg}" if loc else msg)
+                else:
+                    parts.append(str(item))
+            return "; ".join(parts) or "validation failed"
+        return str(detail)
+
+    @app.exception_handler(HTTPException)
+    async def _http_exc_handler(_: Request, exc: HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": _flatten_detail(exc.detail)},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_handler(_: Request, exc: RequestValidationError):
+        return JSONResponse(
+            status_code=422,
+            content={"error": _flatten_detail(exc.errors())},
+        )
 
     @app.get("/api/health")
     async def health() -> dict:

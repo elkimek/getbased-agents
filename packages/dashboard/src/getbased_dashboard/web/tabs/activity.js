@@ -9,11 +9,21 @@ import { authed } from "../app.js";
 
 let _refreshTimer = null;
 
+function _errMessage(body, status, statusText) {
+  const raw = (body && (body.error ?? body.detail)) ?? `HTTP ${status}`;
+  if (typeof raw === "string") return raw;
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return statusText || `HTTP ${status}`;
+  }
+}
+
 async function j(path, opts = {}) {
   const r = await authed(path, opts);
   if (!r.ok) {
-    const err = await r.json().catch(() => ({ detail: r.statusText }));
-    throw new Error(err.detail || err.error || `HTTP ${r.status}`);
+    const body = await r.json().catch(() => null);
+    throw new Error(_errMessage(body, r.status, r.statusText));
   }
   return r.json();
 }

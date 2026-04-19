@@ -11,6 +11,10 @@ authenticate its upstream call to rag.
 
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
+
 import httpx
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
 
@@ -19,6 +23,19 @@ from ..server import _require_auth
 
 _KNOWLEDGE_TIMEOUT = 30.0
 _INGEST_TIMEOUT = 300.0  # real-model ingest can run minutes on large files
+
+# Size cap enforced at the dashboard hop. Mirrors rag's default so users
+# see one consistent ceiling regardless of which layer catches an oversize
+# upload. Configurable via env so power users with large corpora can
+# raise it on both services deliberately. Note: rag has its own cap that
+# ultimately bounds on-disk writes — this dashboard-side cap prevents
+# full buffering into RAM before we reach rag.
+_MAX_INGEST_BYTES = int(
+    os.environ.get("DASHBOARD_MAX_INGEST_BYTES", str(256 * 1024 * 1024))
+)
+# Stream chunk size — 64 KB is plenty for network forwarding and keeps
+# per-request memory predictable.
+_STREAM_CHUNK = 64 * 1024
 
 
 def _cfg(request: Request) -> DashboardConfig:
@@ -122,12 +139,19 @@ def register(app: FastAPI) -> None:
         request: Request,
         files: list[UploadFile] = File(...),
     ):
-        """Forward a multipart upload to rag's /ingest. We can't use the
-        JSON proxy here — upload body is streamed multipart/form-data, and
-        httpx's `files=` wants (name, content, mimetype) tuples, not
-        UploadFile objects. Read each upload fully into memory (bounded
-        by rag's LENS_MAX_INGEST_BYTES cap), then forward as a single
-        multipart request."""
+        """Forward a multipart upload to rag's /ingest.
+
+        We stream each upload to a temp file on disk in chunks, enforcing
+        a byte cap as we read — without this the dashboard would happily
+        buffer a 4 GB upload into RAM before rag ever saw it and had a
+        chance to reject it. Filenames are also sanitised here as a
+        defence-in-depth layer so a malicious basename can never reach
+        rag's filesystem even if rag's own sanitisation ever drifts.
+
+        After all uploads land in the temp dir, we open them as streams
+        and forward to rag with httpx's multipart support, then the temp
+        dir is removed on context-manager exit.
+        """
         cfg = _cfg(request)
         _require_auth(request, cfg)
         key = cfg.read_api_key()
@@ -135,38 +159,76 @@ def register(app: FastAPI) -> None:
         if not files:
             raise HTTPException(status_code=400, detail="No files uploaded")
 
-        # Read all uploads into memory. Fine for typical doc sizes;
-        # streaming forward would be nicer but adds complexity for
-        # little gain at the scale this dashboard targets (single user,
-        # self-hosted, docs not videos).
-        multipart: list[tuple[str, tuple[str, bytes, str]]] = []
-        for upload in files:
-            data = await upload.read()
-            multipart.append(
-                (
-                    "files",
-                    (
-                        upload.filename or "upload",
-                        data,
-                        upload.content_type or "application/octet-stream",
-                    ),
-                )
-            )
+        total_bytes = 0
+        with tempfile.TemporaryDirectory(prefix="gbd-ingest-") as tmpdir:
+            tmp_path = Path(tmpdir)
+            saved: list[tuple[str, Path, str]] = []  # (safe_name, disk_path, mimetype)
 
-        try:
-            async with httpx.AsyncClient(timeout=_INGEST_TIMEOUT) as client:
-                r = await client.post(
-                    f"{cfg.lens_url}/ingest",
-                    headers={"Authorization": f"Bearer {key}"},
-                    files=multipart,
+            for upload in files:
+                # Strip directory components from the client-supplied name
+                # — treat it as untrusted. `os.path.basename` handles both
+                # "/" and "\" separators after we normalise.
+                raw_name = (upload.filename or "").replace("\\", "/")
+                safe_name = os.path.basename(raw_name)
+                if not safe_name or safe_name in (".", ".."):
+                    continue
+
+                dest = tmp_path / safe_name
+                with dest.open("wb") as out:
+                    while True:
+                        chunk = await upload.read(_STREAM_CHUNK)
+                        if not chunk:
+                            break
+                        total_bytes += len(chunk)
+                        if total_bytes > _MAX_INGEST_BYTES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=f"Upload exceeds {_MAX_INGEST_BYTES} bytes",
+                            )
+                        out.write(chunk)
+                saved.append(
+                    (
+                        safe_name,
+                        dest,
+                        upload.content_type or "application/octet-stream",
+                    )
                 )
-        except httpx.ConnectError:
-            raise HTTPException(
-                status_code=502,
-                detail=f"rag server not reachable at {cfg.lens_url}",
-            )
-        except httpx.RequestError as e:
-            raise HTTPException(status_code=502, detail=f"ingest request failed: {e}")
+
+            if not saved:
+                raise HTTPException(status_code=400, detail="No valid files in upload")
+
+            # Forward — open files in binary mode for httpx to stream
+            # their content rather than loading each one again into RAM.
+            fhs: list = []
+            multipart: list[tuple[str, tuple[str, object, str]]] = []
+            try:
+                for name, disk_path, mime in saved:
+                    fh = disk_path.open("rb")
+                    fhs.append(fh)
+                    multipart.append(("files", (name, fh, mime)))
+
+                try:
+                    async with httpx.AsyncClient(timeout=_INGEST_TIMEOUT) as client:
+                        r = await client.post(
+                            f"{cfg.lens_url}/ingest",
+                            headers={"Authorization": f"Bearer {key}"},
+                            files=multipart,
+                        )
+                except httpx.ConnectError:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"rag server not reachable at {cfg.lens_url}",
+                    )
+                except httpx.RequestError as e:
+                    raise HTTPException(
+                        status_code=502, detail=f"ingest request failed: {e}"
+                    )
+            finally:
+                for fh in fhs:
+                    try:
+                        fh.close()
+                    except Exception:
+                        pass
 
         if r.status_code >= 400:
             try:

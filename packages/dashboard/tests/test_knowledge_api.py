@@ -155,20 +155,38 @@ def test_rag_unreachable_returns_502(client: TestClient) -> None:
     respx.get(f"{RAG_BASE}/libraries").mock(side_effect=ConnectError("refused"))
     r = client.get("/api/knowledge/libraries", headers=AUTH)
     assert r.status_code == 502
-    assert "not reachable" in r.json()["detail"]
+    assert "not reachable" in r.json()["error"]
 
 
 @respx.mock
 def test_rag_error_body_is_surfaced(client: TestClient) -> None:
     """rag emits {"error": "..."} via its exception_handler. Dashboard
-    extracts the string and forwards it as `detail` so FastAPI's default
-    envelope stays consistent."""
+    normalises to the same envelope so the browser only has one shape
+    to parse."""
     respx.post(f"{RAG_BASE}/libraries/bogus/activate").mock(
         return_value=Response(404, json={"error": "Library not found"})
     )
     r = client.post("/api/knowledge/libraries/bogus/activate", headers=AUTH)
     assert r.status_code == 404
-    assert r.json()["detail"] == "Library not found"
+    assert r.json() == {"error": "Library not found"}
+
+
+def test_validation_errors_come_back_as_flat_string(client: TestClient) -> None:
+    """FastAPI default would return {"detail": [{"msg": "...", "loc": [...]}...]}.
+    That serialises to "[object Object]" in the browser when we
+    `new Error(err.detail)`. Dashboard's exception handler flattens
+    validation details into a single string so the UI always gets a
+    readable message."""
+    # POST /api/knowledge/search with missing body → Pydantic rejects
+    r = client.post(
+        "/api/knowledge/search", headers=AUTH, content=""
+    )
+    assert r.status_code == 422
+    body = r.json()
+    assert "error" in body
+    assert isinstance(body["error"], str)
+    # The human-readable message should name what's wrong
+    assert len(body["error"]) > 0
 
 
 # ─── Ingest upload proxy ─────────────────────────────────────────────
@@ -198,3 +216,58 @@ def test_ingest_requires_auth(client: TestClient) -> None:
         files=[("files", ("x.md", b"x", "text/markdown"))],
     )
     assert r.status_code == 401
+
+
+def test_ingest_rejects_oversize_before_reaching_rag(
+    client: TestClient, monkeypatch
+) -> None:
+    """CRITICAL regression: dashboard must enforce the byte cap BEFORE
+    buffering the full upload. Previously we read every byte into RAM
+    then forwarded to rag — a rogue client could OOM the dashboard by
+    uploading multi-GB files and rag's own cap never got a say. Now
+    the streaming read checks total_bytes per chunk and raises 413
+    before the disk write finishes."""
+    # Set a tiny dashboard-side cap, independent of rag.
+    from getbased_dashboard.api import knowledge as kn_api
+
+    monkeypatch.setattr(kn_api, "_MAX_INGEST_BYTES", 1024)  # 1 KB
+    # If the check runs before forwarding, rag is never called — so no
+    # respx mock is needed. Confirm by asserting 413 directly.
+    payload = b"A" * 4096  # 4x the cap
+    r = client.post(
+        "/api/knowledge/ingest",
+        headers=AUTH,
+        files=[("files", ("big.md", payload, "text/markdown"))],
+    )
+    assert r.status_code == 413
+    assert "exceeds" in r.json()["error"]
+
+
+@respx.mock
+def test_ingest_sanitises_filename_at_dashboard_layer(
+    client: TestClient,
+) -> None:
+    """Defence-in-depth: dashboard strips path components from the
+    upload's filename before forwarding, so a traversal basename never
+    reaches rag even if rag's own sanitisation ever regresses."""
+    captured = {}
+
+    def _capture(request):
+        # respx gives us the request object; inspect the multipart body
+        # to verify the filename that went upstream.
+        captured["body"] = request.content
+        return Response(
+            200, json={"files_seen": 1, "chunks_indexed": 1, "skipped": []}
+        )
+
+    respx.post(f"{RAG_BASE}/ingest").mock(side_effect=_capture)
+    r = client.post(
+        "/api/knowledge/ingest",
+        headers=AUTH,
+        files=[("files", ("../../../etc/pwned.md", b"# ok\n" + b"x " * 100, "text/markdown"))],
+    )
+    assert r.status_code == 200, r.text
+    # The forwarded multipart should carry only the basename — no
+    # "../" sequences reach rag.
+    assert b"pwned.md" in captured["body"]
+    assert b"../" not in captured["body"]

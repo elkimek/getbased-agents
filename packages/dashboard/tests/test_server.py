@@ -37,13 +37,13 @@ def test_health_reports_missing_key(tmp_path: Path) -> None:
 def test_auth_check_requires_bearer(client: TestClient) -> None:
     r = client.get("/api/auth/check")
     assert r.status_code == 401
-    assert "Missing Bearer" in r.json()["detail"]
+    assert "Missing Bearer" in r.json()["error"]
 
 
 def test_auth_check_rejects_wrong_key(client: TestClient) -> None:
     r = client.get("/api/auth/check", headers={"Authorization": "Bearer nope"})
     assert r.status_code == 401
-    assert "Invalid API key" in r.json()["detail"]
+    assert "Invalid API key" in r.json()["error"]
 
 
 def test_auth_check_accepts_right_key(client: TestClient) -> None:
@@ -63,7 +63,7 @@ def test_auth_check_503_when_no_key_on_disk(tmp_path: Path) -> None:
     c = TestClient(create_app(cfg))
     r = c.get("/api/auth/check", headers={"Authorization": "Bearer x"})
     assert r.status_code == 503
-    assert "No API key found" in r.json()["detail"]
+    assert "No API key found" in r.json()["error"]
 
 
 def test_auth_reads_key_file_fresh_each_request(
