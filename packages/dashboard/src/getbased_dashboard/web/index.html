@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>getbased-dashboard</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>getbased</h1>
+    <nav class="tabs">
+      <button class="tab active" data-tab="knowledge">Knowledge</button>
+      <button class="tab" data-tab="mcp">MCP</button>
+      <button class="tab" data-tab="activity">Activity</button>
+    </nav>
+    <div class="status" id="connection-status">checking…</div>
+  </header>
+
+  <main id="app">
+    <section id="auth-gate" hidden>
+      <h2>Enter your API key</h2>
+      <p>Paste the bearer key from <code>$XDG_DATA_HOME/getbased/lens/api_key</code>.</p>
+      <input type="password" id="api-key-input" placeholder="Bearer token" autocomplete="off">
+      <button id="save-key">Save</button>
+      <p class="err" id="auth-error"></p>
+    </section>
+    <section id="tab-knowledge" class="tab-panel" hidden></section>
+    <section id="tab-mcp" class="tab-panel" hidden></section>
+    <section id="tab-activity" class="tab-panel" hidden></section>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

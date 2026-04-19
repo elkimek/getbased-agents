@@ -11,12 +11,17 @@ Knowledge base queries go through the Lens RAG server (separate process).
 No models are loaded in this process — everything is HTTP.
 """
 
+import functools
 import json
+import logging
 import os
 import re
+import time
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+log = logging.getLogger("getbased_mcp")
 
 mcp = FastMCP("getbased")
 
@@ -25,15 +30,114 @@ TOKEN = os.environ.get("GETBASED_TOKEN", "")
 GATEWAY = os.environ.get("GETBASED_GATEWAY", "https://sync.getbased.health")
 
 LENS_URL = os.environ.get("LENS_URL", f"http://localhost:{os.environ.get('LENS_PORT', '8322')}")
-# Default to getbased-rag's XDG data dir (its canonical key location). The
-# legacy ~/.hermes/rag/lens_api_key path is still honored when set explicitly
-# via LENS_API_KEY_FILE — Hermes users running their own rag engine override
-# this per their config.
-_DEFAULT_KEY_PATH = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
-LENS_API_KEY_FILE = os.environ.get(
-    "LENS_API_KEY_FILE",
-    os.path.join(_DEFAULT_KEY_PATH, "getbased", "lens", "api_key"),
+
+
+def _resolve_default_key_file() -> str:
+    """Default Lens API key path. Prefer the XDG location used by getbased-rag;
+    fall back to the legacy ~/.hermes/rag/lens_api_key so upgrades from the
+    standalone getbased-mcp ≤ 0.1.0 don't silently break on boxes that still
+    have the old key there (e.g. Hermes VMs)."""
+    xdg = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+    new_default = os.path.join(xdg, "getbased", "lens", "api_key")
+    legacy = os.path.expanduser("~/.hermes/rag/lens_api_key")
+    if not os.path.exists(new_default) and os.path.exists(legacy):
+        return legacy
+    return new_default
+
+
+LENS_API_KEY_FILE = os.environ.get("LENS_API_KEY_FILE", _resolve_default_key_file())
+
+# Friendly message surfaced when a tool hits a route the lens server doesn't
+# expose (old lens, pre-libraries). See _lens_call's 404 handling.
+_UNSUPPORTED_LENS_HINT = (
+    "this lens server doesn't expose library management. "
+    "Upgrade to getbased-rag ≥ 0.2.0, or point LENS_URL at a library-capable lens."
 )
+
+# Cap on how much of an upstream error body we echo back to the AI client.
+# Rag's exception_handler emits its own {error: ...} payload — safe in a
+# self-hosted trust model, but that error often ends up in a cloud LLM's
+# context window where the full response text (stack traces, file paths)
+# would be sensitive. Truncate to a short hint.
+_UPSTREAM_ERROR_PREVIEW = 200
+
+
+# ── Activity logging ────────────────────────────────────────────────
+# Every tool call writes one JSONL record: tool name, wall-clock ts,
+# duration in ms, success flag, and error-class on failure. **Args are
+# never logged** — queries can contain sensitive health info, so we
+# record the shape of usage, not its content. The dashboard tails this
+# file for the Activity tab; with no dashboard installed the file is
+# just a rotating-by-hand log the user can inspect.
+#
+# Default path is $XDG_STATE_HOME/getbased/mcp/activity.jsonl
+# (~/.local/state/getbased/mcp/activity.jsonl on Linux). Override with
+# LENS_MCP_ACTIVITY_LOG. Set LENS_MCP_ACTIVITY_LOG=off to disable.
+
+def _activity_log_path() -> str:
+    """Resolve where activity records get appended. Env override wins;
+    otherwise XDG_STATE_HOME. Returns "" when logging is disabled."""
+    override = os.environ.get("LENS_MCP_ACTIVITY_LOG")
+    if override is not None:
+        return "" if override.lower() in ("off", "false", "0", "") else override
+    state = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+    return os.path.join(state, "getbased", "mcp", "activity.jsonl")
+
+
+def _append_activity(tool: str, duration_ms: int, ok: bool, error: str) -> None:
+    """Best-effort JSONL append. Any I/O failure is swallowed — telemetry
+    must never break a tool call. Directory is created on first write."""
+    path = _activity_log_path()
+    if not path:
+        return
+    record = {
+        "ts": time.time(),
+        "tool": tool,
+        "duration_ms": duration_ms,
+        "ok": ok,
+    }
+    if error:
+        record["error"] = error
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError as e:
+        # Don't spam stderr in stdio MCP (it'd confuse the MCP client).
+        # Debug-level is fine; the user can inspect via Python logging.
+        log.debug("activity log append failed: %s", e)
+
+
+def _instrumented(label: str):
+    """Wrap an async tool implementation with success/failure + duration
+    logging. Applied below each `@mcp.tool()` so the registered callable
+    is the instrumented one. Preserves the function's signature and
+    docstring via functools.wraps — FastMCP's tool registration reads
+    those to build the tool schema."""
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            t0 = time.monotonic()
+            error_name = ""
+            ok = True
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as e:
+                ok = False
+                error_name = type(e).__name__
+                raise
+            finally:
+                _append_activity(
+                    label,
+                    int((time.monotonic() - t0) * 1000),
+                    ok,
+                    error_name,
+                )
+
+        return wrapper
+
+    return deco
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -100,9 +204,12 @@ async def _lens_request(query: str, top_k: int = 5) -> dict:
     except httpx.ConnectError:
         return {"error": f"Lens server not reachable at {LENS_URL}. Is it running?"}
     except httpx.HTTPStatusError as e:
-        # Note: response text may contain server-side details (stack traces, DB errors)
-        # Acceptable for self-hosted trust model — operator owns both ends
-        return {"error": f"Lens returned {e.response.status_code}: {e.response.text}"}
+        # The error surfaces into an AI client (typically cloud-hosted),
+        # so don't forward the raw response text — it may contain internal
+        # paths or stack traces. Truncate to a short preview; if an
+        # operator needs more detail they have the lens logs.
+        preview = (e.response.text or "")[:_UPSTREAM_ERROR_PREVIEW]
+        return {"error": f"Lens returned {e.response.status_code}: {preview}"}
     except httpx.RequestError as e:
         return {"error": f"Lens request failed: {e}"}
     except (json.JSONDecodeError, ValueError) as e:
@@ -130,7 +237,21 @@ async def _lens_call(method: str, path: str, json_body: dict | None = None) -> d
     except httpx.ConnectError:
         return {"error": f"Lens server not reachable at {LENS_URL}. Is it running?"}
     except httpx.HTTPStatusError as e:
-        return {"error": f"Lens returned {e.response.status_code}: {e.response.text}"}
+        # Distinguish "this route doesn't exist on the server" (old lens, no
+        # /libraries or /stats endpoint) from a genuine 404 like "library id
+        # not found". FastAPI's default 404 body is `{"detail": "Not Found"}`;
+        # the new lens returns a structured error for real misses.
+        if e.response.status_code == 404:
+            try:
+                body = e.response.json()
+                if body.get("detail") == "Not Found":
+                    return {"error": "unsupported_endpoint"}
+            except (json.JSONDecodeError, ValueError):
+                pass
+        # Same rationale as _lens_request: truncate the body preview so
+        # internal details don't end up in a cloud AI client's context.
+        preview = (e.response.text or "")[:_UPSTREAM_ERROR_PREVIEW]
+        return {"error": f"Lens returned {e.response.status_code}: {preview}"}
     except httpx.RequestError as e:
         return {"error": f"Lens request failed: {e}"}
     except (json.JSONDecodeError, ValueError) as e:
@@ -142,6 +263,7 @@ async def _lens_call(method: str, path: str, json_body: dict | None = None) -> d
 # ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
+@_instrumented("getbased_lab_context")
 async def getbased_lab_context(profile: str = "") -> str:
     """Get a full summary of the user's blood work data, health context,
     supplements, and goals from getbased. Use when the user asks broad
@@ -160,6 +282,7 @@ async def getbased_lab_context(profile: str = "") -> str:
 
 
 @mcp.tool()
+@_instrumented("getbased_section")
 async def getbased_section(section: str = "", profile: str = "") -> str:
     """Get a specific section of health data, or list all available sections.
     Call with no section name to get the index (section names + line counts).
@@ -203,6 +326,7 @@ async def getbased_section(section: str = "", profile: str = "") -> str:
 
 
 @mcp.tool()
+@_instrumented("getbased_list_profiles")
 async def getbased_list_profiles() -> str:
     """List all available profiles in getbased."""
     data = await _fetch_context()
@@ -221,11 +345,10 @@ async def getbased_list_profiles() -> str:
 # ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
+@_instrumented("knowledge_search")
 async def knowledge_search(
     query: str,
     n_results: int = 5,
-    series: str = "",
-    claim_type: str = "",
 ) -> str:
     """Search the knowledge base for relevant passages using semantic similarity.
 
@@ -234,26 +357,15 @@ async def knowledge_search(
     list them with `knowledge_list_libraries` and switch with
     `knowledge_activate_library` before searching.
 
-    Returns passages from curated health and biology research, organized by
-    series and claim type. Use this when the user asks about mechanisms,
-    causal relationships, or prescriptive guidance related to health topics.
+    Returns the top-K passages ranked by relevance, with source
+    attribution. Use this when the user asks about mechanisms, causal
+    relationships, or prescriptive guidance related to health topics.
 
     Args:
         query: Natural language search query (e.g. "folic acid MTHFR methylation")
         n_results: Number of results to return (default 5, max 10)
-        series: Filter to a specific series (e.g. "Decentralized Medicine", "CPC").
-            Currently no-op — placeholder for future Lens metadata filtering.
-            Filter client-side from results if needed.
-        claim_type: Filter to claim type: mechanism, causal, prescriptive, speculative, general.
-            Currently no-op — placeholder for future Lens metadata filtering.
-            Filter client-side from results if needed.
     """
     n_results = max(1, min(10, n_results))
-
-    # TODO: series/claim_type filtering — pass to Lens when it supports metadata filters
-    # Currently Lens returns top-k by relevance only. Filter client-side as needed.
-    _ = series, claim_type  # acknowledge params until Lens supports them
-
     data = await _lens_request(query, top_k=n_results)
 
     if "error" in data:
@@ -275,6 +387,7 @@ async def knowledge_search(
 
 
 @mcp.tool()
+@_instrumented("getbased_lens_config")
 async def getbased_lens_config() -> str:
     """Get the Lens RAG endpoint configuration for getbased's Knowledge Base.
     Returns the URL, API key, and recommended top_k to paste into
@@ -297,12 +410,15 @@ async def getbased_lens_config() -> str:
 
 
 @mcp.tool()
+@_instrumented("knowledge_list_libraries")
 async def knowledge_list_libraries() -> str:
     """List all knowledge base libraries on the Lens server, showing which is
     active. Use this to discover what collections the user has (research
     papers, clinical guides, personal notes, etc.) before searching or
     switching between them."""
     data = await _lens_call("GET", "/libraries")
+    if data.get("error") == "unsupported_endpoint":
+        return f"Knowledge libraries: {_UNSUPPORTED_LENS_HINT}"
     if "error" in data:
         return f"Knowledge libraries error: {data['error']}"
     libs = data.get("libraries") or []
@@ -319,6 +435,7 @@ async def knowledge_list_libraries() -> str:
 
 
 @mcp.tool()
+@_instrumented("knowledge_activate_library")
 async def knowledge_activate_library(library_id: str) -> str:
     """Switch the Lens server's active library. All subsequent
     `knowledge_search` and `knowledge_stats` calls will target this library
@@ -331,6 +448,8 @@ async def knowledge_activate_library(library_id: str) -> str:
     if not library_id:
         return "Error: library_id is required. Call knowledge_list_libraries to find one."
     data = await _lens_call("POST", f"/libraries/{library_id}/activate")
+    if data.get("error") == "unsupported_endpoint":
+        return f"Activate library: {_UNSUPPORTED_LENS_HINT}"
     if "error" in data:
         return f"Activate library error: {data['error']}"
     libs = data.get("libraries") or []
@@ -342,12 +461,15 @@ async def knowledge_activate_library(library_id: str) -> str:
 
 
 @mcp.tool()
+@_instrumented("knowledge_stats")
 async def knowledge_stats() -> str:
     """Get per-source chunk counts for the active knowledge base library.
     Tells you which documents are indexed and how many excerpts each
     contributes. Useful when diagnosing "I can't find X" — either the source
     isn't indexed, or the relevant passages didn't score high enough."""
     data = await _lens_call("GET", "/stats")
+    if data.get("error") == "unsupported_endpoint":
+        return f"Knowledge stats: {_UNSUPPORTED_LENS_HINT}"
     if "error" in data:
         return f"Knowledge stats error: {data['error']}"
     total = data.get("total_chunks", 0)

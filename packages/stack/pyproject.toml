@@ -4,21 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-agent-stack"
-version = "0.1.0"
-description = "One-command install of the full getbased agent stack — getbased-mcp + getbased-rag"
+version = "0.2.0"
+description = "One-command install of the full getbased agent stack — getbased-mcp + getbased-rag + getbased-dashboard"
 readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.10"
-# Pulls both sibling packages. Bump this meta when a sibling protocol
+# Pulls every sibling package. Bump this meta when a sibling protocol
 # bump requires coordinated release.
 dependencies = [
-    "getbased-mcp>=0.2.0",
-    "getbased-rag>=0.1.0",
+    "getbased-mcp>=0.2.2",
+    "getbased-rag>=0.6.0",
+    "getbased-dashboard>=0.5.0",
 ]
 
 [project.optional-dependencies]
 # With the full parser + ONNX stack on the rag side.
-full = ["getbased-rag[full]>=0.1.0"]
+full = ["getbased-rag[full]>=0.6.0"]
 # For contributors running the integration test harness.
 test = ["pytest>=8.0", "httpx>=0.27", "pytest-timeout>=2.3"]
 

@@ -57,6 +57,13 @@ class Embedder(ABC):
         """Return the embedding dimensionality."""
         ...
 
+    def info(self) -> dict:
+        """Return a small dict describing this backend — which engine,
+        which model, active provider, etc. Surfaces to the dashboard so
+        users can see at a glance what's doing the embedding work.
+        Subclasses override; default reports engine name only."""
+        return {"engine": self.__class__.__name__, "dimension": self.dimension()}
+
 
 # ── Known model dimensions ────────────────────────────────────────
 
@@ -319,6 +326,26 @@ class OnnxEmbedder(Embedder):
         self._load()
         return self._dim  # type: ignore[return-value]
 
+    def info(self) -> dict:
+        # Prefer the actually-active provider from the live ORT session
+        # if the model is loaded; fall back to the configured name so
+        # the UI has something to show even before the first encode().
+        active = None
+        if self._session is not None:
+            try:
+                providers = self._session.get_providers()
+                if providers:
+                    active = providers[0]
+            except Exception:
+                pass
+        return {
+            "engine": "onnx",
+            "model": self._model_name,
+            "provider": active or (self._provider_name or "auto"),
+            "dimension": self.dimension(),
+            "loaded": self._session is not None,
+        }
+
 
 # ── Local (sentence-transformers, fallback) ──────────────────────
 
@@ -366,6 +393,29 @@ class LocalEmbedder(Embedder):
         self._load()
         return self._dim  # type: ignore[return-value]
 
+    def info(self) -> dict:
+        # Detect whether torch thinks it has a GPU — sentence-transformers
+        # picks it up automatically, so reporting this matches what's
+        # actually running. Best-effort: the torch import is cheap once
+        # the model has loaded.
+        device = "cpu"
+        try:
+            import torch  # noqa: PLC0415
+
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = "mps"
+        except Exception:
+            pass
+        return {
+            "engine": "pytorch",
+            "model": self._model_name,
+            "device": device,
+            "dimension": self.dimension(),
+            "loaded": self._model is not None,
+        }
+
 
 # ── Cloud Inference (Qdrant Cloud) ────────────────────────────────
 
@@ -407,6 +457,25 @@ class CloudInferenceEmbedder(Embedder):
 
     def dimension(self) -> int:
         return self._dim
+
+    def info(self) -> dict:
+        # URL might be sensitive if it encodes the workspace — strip the
+        # host-tail so the UI gets a hint without leaking the full
+        # endpoint. The api_key is never surfaced.
+        from urllib.parse import urlparse
+
+        host = ""
+        try:
+            host = urlparse(self._url).hostname or ""
+        except Exception:
+            pass
+        return {
+            "engine": "qdrant-cloud",
+            "model": self._model_name,
+            "host": host,
+            "dimension": self.dimension(),
+            "loaded": self._client is not None,
+        }
 
 
 # ── Factory ────────────────────────────────────────────────────────

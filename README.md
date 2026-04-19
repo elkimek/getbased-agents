@@ -1,22 +1,23 @@
 # getbased-agents
 
-Monorepo for the [getbased](https://getbased.health) agent ecosystem — MCP server, RAG backend, and a meta-package that wires them together.
+Monorepo for the [getbased](https://getbased.health) agent ecosystem — MCP server, RAG backend, web dashboard, and a meta-package that wires them together.
 
 | Package | PyPI | Role | Contents |
 |---|---|---|---|
 | [`getbased-mcp`](packages/mcp/) | `getbased-mcp` | MCP adapter for Claude Code / Hermes / OpenClaw / any MCP client | stdio ↔ HTTP |
 | [`getbased-rag`](packages/rag/) | `getbased-rag` | Local RAG knowledge server. Also the PWA's "External server" Knowledge Base backend | FastAPI + Qdrant + MiniLM/BGE |
-| [`getbased-agent-stack`](packages/stack/) | `getbased-agent-stack` | Meta-package pinning the two siblings | thin CLI + systemd unit + example configs |
+| [`getbased-dashboard`](packages/dashboard/) | `getbased-dashboard` | Browser UI: manage knowledge libraries, generate MCP client configs, see agent activity | FastAPI + vanilla JS |
+| [`getbased-agent-stack`](packages/stack/) | `getbased-agent-stack` | Meta-package pinning all three siblings | thin CLI + systemd unit + example configs |
 
 ```
-Claude Code / Hermes / OpenClaw
-        │ MCP (stdio)
-        ▼
-  getbased-mcp
-   │        │
-   │ HTTP   │ HTTP
-   ▼        ▼
-sync GW   getbased-rag
+Claude Code / Hermes / OpenClaw           Browser
+        │ MCP (stdio)                       │ HTTP
+        ▼                                   ▼
+  getbased-mcp                    getbased-dashboard  (localhost:8323)
+   │        │                        │             │
+   │ HTTP   │ HTTP                   │ proxies     │ spawns stdio
+   ▼        ▼                        ▼             ▼
+sync GW   getbased-rag  ◄──────────┘         getbased-mcp
           (localhost:8322)
 ```
 
@@ -33,6 +34,7 @@ Or pick the piece you actually need:
 ```bash
 pipx install getbased-mcp            # agents for lab data only, no RAG  (~10 MB)
 pipx install "getbased-rag[full]"    # RAG backend for the PWA, no agents (~500 MB)
+pipx install getbased-dashboard      # web UI; pulls the MCP dep alongside it
 ```
 
 ## Quickstart
@@ -50,9 +52,10 @@ uv sync --all-packages --all-extras
 Each package runs its own tests from its own directory:
 
 ```bash
-(cd packages/mcp && uv run pytest)     # 22 unit tests, respx-mocked HTTP
-(cd packages/rag && uv run pytest)     # 26 tests, FastAPI TestClient + fake embedder
-(cd packages/stack && uv run pytest)   # 2 integration tests: real lens subprocess + real MCP tool calls
+(cd packages/mcp && uv run pytest)       # 33 unit tests, respx-mocked HTTP
+(cd packages/rag && uv run pytest)       # 33 tests, FastAPI TestClient + fake embedder
+(cd packages/dashboard && uv run pytest) # 58 tests, respx-mocked rag + real-subprocess MCP probe
+(cd packages/stack && uv run pytest)     # 2 integration tests: real lens subprocess + real MCP tool calls
 ```
 
 CI runs the same matrix on Python 3.10/3.11/3.12 (unit) + 3.12 (integration) on every push and PR.
@@ -60,6 +63,7 @@ CI runs the same matrix on Python 3.10/3.11/3.12 (unit) + 3.12 (integration) on 
 Per-package details:
 - [packages/mcp/README.md](packages/mcp/README.md) + [CONTRIBUTING](packages/mcp/CONTRIBUTING.md) + [SECURITY](packages/mcp/SECURITY.md)
 - [packages/rag/README.md](packages/rag/README.md) + [CONTRIBUTING](packages/rag/CONTRIBUTING.md) + [SECURITY](packages/rag/SECURITY.md)
+- [packages/dashboard/README.md](packages/dashboard/README.md)
 - [packages/stack/README.md](packages/stack/README.md) + [CONTRIBUTING](packages/stack/CONTRIBUTING.md) + [SECURITY](packages/stack/SECURITY.md)
 
 ## Releases
@@ -76,8 +80,10 @@ This repo was formed by merging three previously-separate repos. History is pres
 - `elkimek/getbased-rag` → `packages/rag/` (archived)
 - `elkimek/getbased-agent-stack` → `packages/stack/` + root scaffolding (renamed to this repo)
 
+`packages/dashboard/` is new in this repo, not inherited from an archive.
+
 PyPI package names stay the same — the merge is repo-layout only.
 
 ## Licence
 
-GPL-3.0-only, consistent across all three packages.
+GPL-3.0-only, consistent across all four packages.

@@ -55,8 +55,13 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LensConfig:
 @pytest.fixture
 def patched_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
     """Swap out the real embedder factory with the fake one so tests don't
-    pay the MiniLM download cost."""
+    pay the MiniLM download cost. Patch both callsites — server.py for
+    /query, ingest.py for /ingest — otherwise ingest tests would quietly
+    load real MiniLM and take ~30s each."""
+    from lens import ingest as ingest_mod
+
     monkeypatch.setattr(server_mod, "create_embedder", lambda cfg: FakeEmbedder())
+    monkeypatch.setattr(ingest_mod, "create_embedder", lambda cfg: FakeEmbedder())
 
 
 @pytest.fixture
