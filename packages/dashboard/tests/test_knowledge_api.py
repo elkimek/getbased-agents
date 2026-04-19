@@ -282,6 +282,74 @@ def test_ingest_rejects_oversize_before_reaching_rag(
 
 
 @respx.mock
+def test_ingest_streams_ndjson_events_when_accept_requested(
+    client: TestClient,
+) -> None:
+    """Browser sends `Accept: application/x-ndjson`; dashboard forwards
+    the Accept header upstream and pipes each line of rag's stream back
+    to the client verbatim. UI's fetch+reader loop sees start/file/result
+    events identical to what rag emitted."""
+    ndjson_body = (
+        '{"event":"start","total":2}\n'
+        '{"event":"file","index":1,"total":2,"source":"a.md","chunks":3}\n'
+        '{"event":"file","index":2,"total":2,"source":"b.md","chunks":5}\n'
+        '{"event":"result","files_seen":2,"chunks_indexed":8,"skipped":[]}\n'
+    )
+    respx.post(f"{RAG_BASE}/ingest").mock(
+        return_value=Response(
+            200, text=ndjson_body, headers={"content-type": "application/x-ndjson"}
+        )
+    )
+    r = client.post(
+        "/api/knowledge/ingest",
+        headers={**AUTH, "Accept": "application/x-ndjson"},
+        files=[
+            ("files", ("a.md", b"hi" * 200, "text/markdown")),
+            ("files", ("b.md", b"yo" * 200, "text/markdown")),
+        ],
+    )
+    assert r.status_code == 200
+    # The dashboard should have passed each line through
+    lines = [l for l in r.text.splitlines() if l.strip()]
+    import json as _json
+
+    events = [_json.loads(l) for l in lines]
+    assert events[0]["event"] == "start"
+    assert events[0]["total"] == 2
+    assert events[-1]["event"] == "result"
+    assert events[-1]["chunks_indexed"] == 8
+
+
+@respx.mock
+def test_ingest_stream_rewrites_upstream_error_as_event(
+    client: TestClient,
+) -> None:
+    """If rag returns 4xx/5xx when the client is streaming, we still emit
+    an `error` event in the NDJSON body so the UI's reader loop has one
+    consistent code path."""
+    respx.post(f"{RAG_BASE}/ingest").mock(
+        return_value=Response(
+            500, json={"error": "rag fell over"}, headers={"content-type": "application/json"}
+        )
+    )
+    r = client.post(
+        "/api/knowledge/ingest",
+        headers={**AUTH, "Accept": "application/x-ndjson"},
+        files=[("files", ("x.md", b"hi" * 200, "text/markdown"))],
+    )
+    # Dashboard still returns 200 so the browser gets the stream body;
+    # error is conveyed as an NDJSON event.
+    assert r.status_code == 200
+    import json as _json
+
+    lines = [l for l in r.text.splitlines() if l.strip()]
+    events = [_json.loads(l) for l in lines]
+    assert any(e.get("event") == "error" for e in events), events
+    err = next(e for e in events if e.get("event") == "error")
+    assert "rag fell over" in err["message"]
+
+
+@respx.mock
 def test_ingest_sanitises_filename_at_dashboard_layer(
     client: TestClient,
 ) -> None:

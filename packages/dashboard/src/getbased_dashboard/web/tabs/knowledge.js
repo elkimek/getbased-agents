@@ -108,6 +108,13 @@ function renderLibraries(root) {
       <div id="drop-zone" class="drop-zone">
         <p>Drag &amp; drop .md / .txt / .pdf / .docx / .zip here, or <button type="button" id="pick-files-btn" class="link">pick files</button></p>
         <input type="file" id="file-input" class="visually-hidden" multiple />
+        <div id="ingest-progress" class="ingest-progress" hidden>
+          <div class="progress-head">
+            <span id="progress-label" class="progress-label">Starting…</span>
+            <span id="progress-count" class="progress-count"></span>
+          </div>
+          <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+        </div>
         <div id="ingest-status" class="ingest-status"></div>
       </div>
     </section>
@@ -250,24 +257,95 @@ function wireHandlers(root) {
     status.className = `ingest-status ${cls}`;
   }
 
+  // Progress widget — hidden by default, shown during ingest.
+  const progressEl = root.querySelector("#ingest-progress");
+  const progressLabel = root.querySelector("#progress-label");
+  const progressCount = root.querySelector("#progress-count");
+  const progressFill = root.querySelector("#progress-fill");
+
+  function showProgress() {
+    progressEl.hidden = false;
+    progressLabel.textContent = "Starting…";
+    progressCount.textContent = "";
+    progressFill.style.width = "0%";
+  }
+  function hideProgress() {
+    progressEl.hidden = true;
+  }
+  function updateProgress(done, total, source) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    progressFill.style.width = `${pct}%`;
+    progressCount.textContent = `${done} / ${total}`;
+    if (source) progressLabel.textContent = source;
+  }
+
   async function doIngest(fileList) {
     if (!fileList || !fileList.length) return;
     const fd = new FormData();
     for (const f of fileList) fd.append("files", f, f.name);
-    setStatus(`Ingesting ${fileList.length} file(s)…`, "");
+    setStatus("", "");
+    showProgress();
+
     try {
-      const out = await authed("/api/knowledge/ingest", { method: "POST", body: fd });
-      if (!out.ok) {
-        const body = await out.json().catch(() => null);
-        throw new Error(_errMessage(body, out.status, out.statusText));
+      // Stream NDJSON — rag + dashboard both support the `application/
+      // x-ndjson` accept header, emitting {event:"start"}, {event:"file"}
+      // per processed file, and a final {event:"result"|"error"}.
+      const resp = await authed("/api/knowledge/ingest", {
+        method: "POST",
+        body: fd,
+        headers: { Accept: "application/x-ndjson" },
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => null);
+        throw new Error(_errMessage(body, resp.status, resp.statusText));
       }
-      const result = await out.json();
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let total = 0;
+      let final = null;
+      let errorMsg = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          let evt;
+          try {
+            evt = JSON.parse(line);
+          } catch {
+            continue; // skip malformed progress line
+          }
+          if (evt.event === "start") {
+            total = evt.total || 0;
+            updateProgress(0, total, "");
+          } else if (evt.event === "file") {
+            updateProgress(evt.index || 0, total || evt.total || 0, evt.source || "");
+          } else if (evt.event === "result") {
+            final = evt;
+          } else if (evt.event === "error") {
+            errorMsg = evt.message || "ingest failed";
+          }
+        }
+      }
+
+      hideProgress();
+      if (errorMsg) throw new Error(errorMsg);
+      if (!final) throw new Error("stream ended without result");
+
       setStatus(
-        `Indexed ${result.chunks_indexed} chunk(s) from ${result.files_seen} file(s). Skipped: ${(result.skipped || []).length}`,
+        `Indexed ${final.chunks_indexed} chunk(s) from ${final.files_seen} file(s). Skipped: ${(final.skipped || []).length}`,
         "ok"
       );
-      render(root);  // sources list refresh — preserved status re-applies
+      render(root); // sources list refresh — preserved status re-applies
     } catch (err) {
+      hideProgress();
       setStatus(`Failed: ${err.message}`, "err");
     }
   }

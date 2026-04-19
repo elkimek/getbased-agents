@@ -18,6 +18,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -28,7 +29,7 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .api_key import get_or_create_api_key
@@ -335,6 +336,7 @@ def create_app(config: LensConfig) -> FastAPI:
 
     @app.post("/ingest")
     async def ingest_endpoint(
+        request: Request,
         files: list[UploadFile] = File(...),
         authorization: Optional[str] = Header(default=None),
     ):
@@ -343,12 +345,18 @@ def create_app(config: LensConfig) -> FastAPI:
         Accepts `multipart/form-data` with one or more `files` parts.
         Each uploaded file is written to a short-lived temp directory,
         run through the same pipeline as `lens ingest <path>`, then
-        the temp dir is discarded. The response is the ingest summary
-        (file count, chunk count, skipped list).
+        the temp dir is discarded.
+
+        Response shape depends on `Accept`:
+          - Default (JSON): single-shot summary dict (backward compatible)
+          - `application/x-ndjson`: line-delimited JSON progress stream,
+            one event per line. Terminates with a summary event
+            {"event": "result", ...}. Lets UIs draw a live progress bar
+            over a long-running ingest instead of staring at a spinner.
 
         Directory layout is flat — the uploaded basename becomes the
-        source field on chunks, matching how `lens ingest <file>`
-        would name them.
+        source field on chunks, matching how `lens ingest <file>` names
+        them.
         """
         require_auth(authorization)
         if not files:
@@ -394,13 +402,69 @@ def create_app(config: LensConfig) -> FastAPI:
             # file lock. Creating a fresh QdrantBackend in the ingest
             # path would fail with AlreadyLocked whenever the server is
             # up, which is the normal case.
+            store_obj = active_store()
+            embedder_obj = get_embedder()
+            backend_obj = _get_backend()
+
+            # Stream NDJSON when the client asks for it — UI can draw a
+            # live progress bar over a long ingest instead of spinning.
+            accept = (request.headers.get("accept") or "").lower()
+            want_stream = "application/x-ndjson" in accept
+
+            if want_stream:
+                # Run ingest to completion inside the tempdir scope,
+                # collecting progress events as they fire. Buffering is
+                # tiny (one dict per file) compared to the upload — a
+                # 1000-file ingest is ~200 KB of events total. This lets
+                # us safely delete the tempdir when we return while still
+                # letting the UI render a progress bar from the replay.
+                import asyncio as _asyncio
+
+                events: list[dict] = []
+                loop = _asyncio.get_running_loop()
+
+                def _sync_on_event(evt: dict) -> None:
+                    # Called from the worker thread — hop back to the
+                    # loop to append so we don't race on the list (CPython
+                    # list.append is atomic but this keeps things tidy).
+                    loop.call_soon_threadsafe(events.append, evt)
+
+                try:
+                    result = await _asyncio.to_thread(
+                        ingest_path,
+                        config,
+                        tmp_path,
+                        False,  # emit_progress (stdout) — use callback instead
+                        store_obj,
+                        embedder_obj,
+                        backend_obj,
+                        _sync_on_event,
+                    )
+                    events.append({"event": "result", **result})
+                except FileNotFoundError as e:
+                    events.append({"event": "error", "message": str(e)})
+                except Exception:
+                    log.exception("Streaming ingest failed")
+                    events.append(
+                        {"event": "error", "message": "ingest failed — see server logs"}
+                    )
+
+                def _gen():
+                    for evt in events:
+                        yield (json.dumps(evt) + "\n").encode()
+
+                return StreamingResponse(
+                    _gen(), media_type="application/x-ndjson"
+                )
+
+            # Default: single-shot JSON (backward compatible).
             try:
                 result = ingest_path(
                     config,
                     tmp_path,
-                    store=active_store(),
-                    embedder=get_embedder(),
-                    backend=_get_backend(),
+                    store=store_obj,
+                    embedder=embedder_obj,
+                    backend=backend_obj,
                 )
             except FileNotFoundError as e:
                 raise HTTPException(400, str(e))

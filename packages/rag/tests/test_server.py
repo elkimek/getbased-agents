@@ -400,6 +400,85 @@ def test_ingest_rejects_empty_upload(client: TestClient, auth: dict) -> None:
     assert r.status_code in (400, 422)
 
 
+def test_ingest_ndjson_stream_emits_start_file_and_result_events(
+    client: TestClient, auth: dict
+) -> None:
+    """With Accept: application/x-ndjson, rag emits a progress stream:
+    one `start` event (with total count), one `file` event per file, and
+    a terminal `result` event with the summary. UI consumes these to
+    draw a live progress bar."""
+    r = client.post(
+        "/ingest",
+        headers={**auth, "Accept": "application/x-ndjson"},
+        files=[
+            ("files", ("one.md", b"# one\n" + b"alpha " * 150, "text/markdown")),
+            ("files", ("two.md", b"# two\n" + b"beta " * 150, "text/markdown")),
+        ],
+    )
+    assert r.status_code == 200
+    # Body is line-delimited JSON
+    lines = [l for l in r.text.splitlines() if l.strip()]
+    events = [__import__("json").loads(l) for l in lines]
+    starts = [e for e in events if e.get("event") == "start"]
+    files = [e for e in events if e.get("event") == "file"]
+    results = [e for e in events if e.get("event") == "result"]
+    errors = [e for e in events if e.get("event") == "error"]
+
+    assert len(starts) == 1, events
+    assert starts[0]["total"] == 2
+    assert len(files) == 2, events
+    assert {f["source"] for f in files} == {"one.md", "two.md"}
+    assert len(results) == 1, events
+    assert results[0]["files_seen"] == 2
+    assert results[0]["chunks_indexed"] >= 2
+    assert not errors
+
+
+def test_ingest_ndjson_stream_reports_error_as_event(
+    client: TestClient, auth: dict, monkeypatch
+) -> None:
+    """If ingest blows up, the stream must terminate with an `error`
+    event rather than tearing the connection down with no signal. UI
+    needs a single code path for failure."""
+    from lens import ingest as ingest_mod
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(ingest_mod, "ingest_path", boom)
+
+    r = client.post(
+        "/ingest",
+        headers={**auth, "Accept": "application/x-ndjson"},
+        files=[("files", ("x.md", b"# x\n" + b"y " * 100, "text/markdown"))],
+    )
+    assert r.status_code == 200  # streaming 200; errors go in-band
+    import json as _json
+
+    lines = [l for l in r.text.splitlines() if l.strip()]
+    events = [_json.loads(l) for l in lines]
+    errors = [e for e in events if e.get("event") == "error"]
+    assert errors, events
+    # Message is generic — we don't leak the raw exception string to clients
+    assert "ingest failed" in errors[0]["message"].lower() or "synthetic" in errors[0]["message"]
+
+
+def test_ingest_json_single_shot_still_works_without_accept_header(
+    client: TestClient, auth: dict
+) -> None:
+    """Backward compatibility: clients that don't ask for NDJSON keep
+    getting the original single-shot summary dict. No breaking change."""
+    r = client.post(
+        "/ingest",
+        headers=auth,
+        files=[("files", ("x.md", b"# x\n" + b"z " * 100, "text/markdown"))],
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "files_seen" in body
+    assert "chunks_indexed" in body
+
+
 def test_ingest_reuses_server_backend_not_a_fresh_one(
     client: TestClient, auth: dict, monkeypatch
 ) -> None:

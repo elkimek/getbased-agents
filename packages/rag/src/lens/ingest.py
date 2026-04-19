@@ -101,16 +101,21 @@ def ingest_path(
     store: Store | None = None,
     embedder=None,
     backend: QdrantBackend | None = None,
+    on_event=None,
 ) -> dict:
     """Ingest a file or directory into the lens store. Returns summary stats.
     A .zip input is auto-extracted into a temp directory and ingested as if
     the user had passed that directory; the temp dir is removed on exit.
 
-    When `emit_progress` is True, prints JSONL progress events to stdout
-    before the final result line. Events: {"event":"start","total":N},
-    {"event":"file","index":i,"total":N,"source":"...","chunks":n}. The
-    final line is the result dict (no "event" key) so Rust can route
-    JSONL lines to progress state vs result capture.
+    Progress reporting has two transports:
+      - `emit_progress=True` prints JSONL events to stdout (CLI/subprocess
+        consumer path — Rust / Tauri read this).
+      - `on_event=<callable>` gets each event dict directly (HTTP streaming
+        path — the server plumbs events into an NDJSON response).
+
+    Events: {"event":"start","total":N}, {"event":"file","index":i,
+    "total":N,"source":"...","chunks":n,"skipped"?:bool}. The return value
+    is the final summary dict (no "event" key).
 
     `store`, `embedder`, and `backend` are for in-process reuse — when the
     HTTP server calls ingest it passes its own singletons, otherwise a
@@ -128,6 +133,7 @@ def ingest_path(
             store=store,
             embedder=embedder,
             backend=backend,
+            on_event=on_event,
         )
 
 
@@ -138,11 +144,19 @@ def _ingest_walk(
     store: Store | None = None,
     embedder=None,
     backend: QdrantBackend | None = None,
+    on_event=None,
 ) -> dict:
     import json as _json
     import sys as _sys
 
     def _emit(**event):
+        # Direct-callback path wins when both are set — HTTP streaming
+        # and stdout-to-subprocess are orthogonal use cases.
+        if on_event is not None:
+            try:
+                on_event(event)
+            except Exception as e:
+                log.debug("progress callback failed: %s", e)
         if not emit_progress:
             return
         print(_json.dumps(event), flush=True)

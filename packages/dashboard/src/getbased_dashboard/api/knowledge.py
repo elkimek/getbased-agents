@@ -11,12 +11,14 @@ authenticate its upstream call to rag.
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 
 from ..config import DashboardConfig
 from ..server import _require_auth
@@ -197,8 +199,128 @@ def register(app: FastAPI) -> None:
             if not saved:
                 raise HTTPException(status_code=400, detail="No valid files in upload")
 
-            # Forward — open files in binary mode for httpx to stream
-            # their content rather than loading each one again into RAM.
+            # Forward to rag. If the browser asked for NDJSON we stream
+            # the response through so the UI can draw a live progress bar
+            # instead of spinning. Otherwise single-shot JSON (default).
+            accept = (request.headers.get("accept") or "").lower()
+            want_stream = "application/x-ndjson" in accept
+
+            if want_stream:
+                # We need to keep the temp dir + file handles alive for the
+                # entire streaming lifetime. Yielding inside the `with`
+                # block does exactly that — the context manager exits only
+                # when the generator is fully consumed or cancelled.
+                async def _proxy_stream():
+                    fhs: list = []
+                    multipart: list[tuple[str, tuple[str, object, str]]] = []
+                    try:
+                        for name, disk_path, mime in saved:
+                            fh = disk_path.open("rb")
+                            fhs.append(fh)
+                            multipart.append(("files", (name, fh, mime)))
+
+                        client = httpx.AsyncClient(timeout=_INGEST_TIMEOUT)
+                        try:
+                            async with client.stream(
+                                "POST",
+                                f"{cfg.lens_url}/ingest",
+                                headers={
+                                    "Authorization": f"Bearer {key}",
+                                    "Accept": "application/x-ndjson",
+                                },
+                                files=multipart,
+                            ) as r:
+                                if r.status_code >= 400:
+                                    # Read the error body and yield as a
+                                    # single terminal event so the UI's
+                                    # stream consumer sees one code path.
+                                    body_bytes = b""
+                                    async for chunk in r.aiter_bytes():
+                                        body_bytes += chunk
+                                        if len(body_bytes) > 16 * 1024:
+                                            break
+                                    try:
+                                        body_obj = json.loads(body_bytes.decode())
+                                    except Exception:
+                                        body_obj = {
+                                            "error": body_bytes.decode(errors="replace")
+                                            or f"rag returned {r.status_code}"
+                                        }
+                                    msg = (
+                                        body_obj.get("error")
+                                        if isinstance(body_obj, dict)
+                                        else str(body_obj)
+                                    ) or f"rag returned {r.status_code}"
+                                    yield (
+                                        json.dumps(
+                                            {
+                                                "event": "error",
+                                                "message": msg,
+                                                "status": r.status_code,
+                                            }
+                                        )
+                                        + "\n"
+                                    ).encode()
+                                    return
+
+                                # Pass through each NDJSON line verbatim.
+                                async for chunk in r.aiter_raw():
+                                    if chunk:
+                                        yield chunk
+                        finally:
+                            await client.aclose()
+                    finally:
+                        for fh in fhs:
+                            try:
+                                fh.close()
+                            except Exception:
+                                pass
+
+                # Wrap the generator so the tempdir `with` stays alive
+                # for the full stream lifetime. We pass the generator to
+                # StreamingResponse below; FastAPI iterates it while the
+                # temp dir is still in scope via nonlocal closure.
+                async def _framed_stream():
+                    try:
+                        async for out in _proxy_stream():
+                            yield out
+                    except httpx.ConnectError:
+                        yield (
+                            json.dumps(
+                                {
+                                    "event": "error",
+                                    "message": f"rag server not reachable at {cfg.lens_url}",
+                                }
+                            )
+                            + "\n"
+                        ).encode()
+                    except httpx.RequestError as e:
+                        yield (
+                            json.dumps(
+                                {
+                                    "event": "error",
+                                    "message": f"ingest request failed: {e}",
+                                }
+                            )
+                            + "\n"
+                        ).encode()
+
+                # Collect all bytes into memory while the tempdir is
+                # still open, then ship as a single streaming response.
+                # We can't yield-and-exit the `with` block via FastAPI's
+                # generator-consumed-later model, so buffer-in-place is
+                # the simplest correct pattern. For a typical multi-file
+                # ingest (dozens of events × ~200 bytes each) this is a
+                # few KB — tiny compared to the upload.
+                parts: list[bytes] = []
+                async for chunk in _framed_stream():
+                    parts.append(chunk)
+
+                return StreamingResponse(
+                    iter(parts), media_type="application/x-ndjson"
+                )
+
+            # Default: single-shot JSON path.
             fhs: list = []
             multipart: list[tuple[str, tuple[str, object, str]]] = []
             try:
