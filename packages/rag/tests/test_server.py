@@ -309,6 +309,102 @@ def test_ingest_file_size_cap(tmp_path) -> None:
         _read_text(big)
 
 
+# ── POST /ingest — HTTP file upload ────────────────────────────────
+
+def test_ingest_requires_auth(client: TestClient) -> None:
+    r = client.post("/ingest", files={"files": ("x.md", b"hello", "text/markdown")})
+    assert r.status_code == 401
+
+
+def test_ingest_happy_path(client: TestClient, auth: dict) -> None:
+    """Upload a markdown file → it should land in the active library as chunks
+    tagged with the uploaded filename as `source`."""
+    r = client.post(
+        "/ingest",
+        headers=auth,
+        files=[("files", ("vitd-notes.md", b"# Vitamin D\n\nSynthesised in skin when UVB hits 7-dehydrocholesterol. " * 20, "text/markdown"))],
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body.get("files_seen", 0) >= 1
+    assert body.get("chunks_indexed", 0) >= 1
+    # Stats should now show that source
+    stats = client.get("/stats", headers=auth).json()
+    sources = [d["source"] for d in stats["documents"]]
+    assert "vitd-notes.md" in sources
+
+
+def test_ingest_multiple_files(client: TestClient, auth: dict) -> None:
+    """Multi-file uploads are flattened into one temp dir and ingested as
+    a unit — both files show up as distinct sources afterward."""
+    r = client.post(
+        "/ingest",
+        headers=auth,
+        files=[
+            ("files", ("a.md", b"# A\n\n" + b"content " * 100, "text/markdown")),
+            ("files", ("b.md", b"# B\n\n" + b"other " * 100, "text/markdown")),
+        ],
+    )
+    assert r.status_code == 200
+    stats = client.get("/stats", headers=auth).json()
+    sources = {d["source"] for d in stats["documents"]}
+    assert {"a.md", "b.md"}.issubset(sources)
+
+
+def test_ingest_strips_path_components_from_filename(client: TestClient, auth: dict) -> None:
+    """A filename like '../../foo.md' must never escape the temp dir. The
+    server-side basename sanitisation should reduce it to 'foo.md'.
+    (Use a .md extension so the ingest walker actually picks the file up
+    — traversal chars without an allowed extension get skipped anyway,
+    but we want to verify the sanitiser, not the walker.)"""
+    r = client.post(
+        "/ingest",
+        headers=auth,
+        files=[("files", ("../../../etc/pwned.md", b"# safe\n" + b"x " * 200, "text/markdown"))],
+    )
+    assert r.status_code == 200
+    stats = client.get("/stats", headers=auth).json()
+    sources = {d["source"] for d in stats["documents"]}
+    assert "pwned.md" in sources
+    # No traversal sequence anywhere in the recorded source metadata
+    assert not any(".." in s or "/" in s.lstrip(".") for s in sources)
+
+
+def test_ingest_rejects_empty_upload(client: TestClient, auth: dict) -> None:
+    """Blank filename uploads should be rejected — FastAPI may catch this
+    at validation (422) or it may reach our sanitiser (400 "No valid files").
+    Both are correct behaviour; either is fine as long as nothing writes."""
+    r = client.post(
+        "/ingest",
+        headers=auth,
+        files=[("files", ("", b"x", "text/plain"))],
+    )
+    assert r.status_code in (400, 422)
+
+
+def test_ingest_rejects_oversize_upload(
+    client: TestClient, auth: dict, monkeypatch
+) -> None:
+    """Total upload > LENS_MAX_INGEST_BYTES should 413 without writing past
+    the cap. We set a tiny cap via env and upload just over it."""
+    monkeypatch.setenv("LENS_MAX_INGEST_BYTES", "1024")
+    # Rebuild the app so the endpoint picks up the new cap
+    from lens.server import create_app
+    from lens.config import LensConfig
+
+    small_app = create_app(LensConfig.from_env())
+    c2 = TestClient(small_app)
+    # 2 KB payload > 1 KB cap
+    payload = b"A" * 2048
+    r = c2.post(
+        "/ingest",
+        headers=auth,
+        files=[("files", ("big.md", payload, "text/markdown"))],
+    )
+    assert r.status_code == 413
+    assert "exceeds" in r.json()["error"]
+
+
 def test_500_errors_dont_leak_exception_details(client: TestClient, auth: dict, monkeypatch) -> None:
     """Verify the 500-response sanitisation — a forced internal error should
     surface a generic message, not the raw traceback / path / exception repr."""

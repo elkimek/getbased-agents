@@ -19,13 +19,14 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import os
 import secrets
+import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
-import os
-
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -323,6 +324,80 @@ def create_app(config: LensConfig) -> FastAPI:
             for r in results
         ]
         return QueryResponse(chunks=chunks)
+
+    # Upload size ceiling — protects disk + memory when the dashboard
+    # (or any UI) uploads files. Generous for docs, tight enough that a
+    # runaway client can't fill the temp partition. Overridable via env
+    # so power users with large corpora can raise it deliberately.
+    _MAX_INGEST_BYTES = int(
+        os.environ.get("LENS_MAX_INGEST_BYTES", str(256 * 1024 * 1024))
+    )
+
+    @app.post("/ingest")
+    async def ingest_endpoint(
+        files: list[UploadFile] = File(...),
+        authorization: Optional[str] = Header(default=None),
+    ):
+        """Ingest uploaded files into the active library.
+
+        Accepts `multipart/form-data` with one or more `files` parts.
+        Each uploaded file is written to a short-lived temp directory,
+        run through the same pipeline as `lens ingest <path>`, then
+        the temp dir is discarded. The response is the ingest summary
+        (file count, chunk count, skipped list).
+
+        Directory layout is flat — the uploaded basename becomes the
+        source field on chunks, matching how `lens ingest <file>`
+        would name them.
+        """
+        require_auth(authorization)
+        if not files:
+            raise HTTPException(400, "No files uploaded")
+
+        total_bytes = 0
+        with tempfile.TemporaryDirectory(prefix="lens-ingest-") as tmpdir:
+            tmp_path = Path(tmpdir)
+            written_any = False
+            for upload in files:
+                # Strip any directory components — treat the client-supplied
+                # name as untrusted. `os.path.basename` on "..\\foo.pdf"
+                # does the right thing across platforms.
+                raw_name = upload.filename or ""
+                name = os.path.basename(raw_name.replace("\\", "/"))
+                if not name or name in (".", ".."):
+                    continue
+                dest = tmp_path / name
+                with dest.open("wb") as out:
+                    while True:
+                        chunk = await upload.read(64 * 1024)
+                        if not chunk:
+                            break
+                        total_bytes += len(chunk)
+                        if total_bytes > _MAX_INGEST_BYTES:
+                            raise HTTPException(
+                                413,
+                                f"Upload exceeds {_MAX_INGEST_BYTES} bytes",
+                            )
+                        out.write(chunk)
+                written_any = True
+
+            if not written_any:
+                raise HTTPException(400, "No valid files in upload")
+
+            # Import lazily — ingest pulls in heavy deps (embedder,
+            # optional PDF/DOCX parsers) that we don't want to pay for on
+            # server import if ingest is never called.
+            from .ingest import ingest_path
+
+            try:
+                result = ingest_path(config, tmp_path)
+            except FileNotFoundError as e:
+                raise HTTPException(400, str(e))
+            except Exception:
+                log.exception("Ingest failed")
+                raise HTTPException(500, "Ingest failed — see server logs")
+
+        return result
 
     # ── Library management ─────────────────────────────────────────────
 

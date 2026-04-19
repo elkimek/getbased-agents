@@ -21,7 +21,7 @@ function saveKey(k) {
   else localStorage.removeItem(KEY_STORAGE);
 }
 
-async function authed(path, opts = {}) {
+export async function authed(path, opts = {}) {
   const key = storedKey();
   const headers = Object.assign({}, opts.headers, {
     Authorization: `Bearer ${key}`,
@@ -45,7 +45,11 @@ function hideGate() {
   document.getElementById("auth-gate").hidden = true;
 }
 
-function activateTab(name) {
+const TAB_MODULES = {
+  knowledge: () => import("./tabs/knowledge.js"),
+};
+
+async function activateTab(name) {
   document.querySelectorAll(".tab").forEach((t) => {
     t.classList.toggle("active", t.dataset.tab === name);
   });
@@ -53,9 +57,13 @@ function activateTab(name) {
     p.hidden = p.id !== `tab-${name}`;
   });
   const panel = document.getElementById(`tab-${name}`);
-  if (panel && !panel.dataset.rendered) {
-    panel.innerHTML = `<p style="color: var(--text-dim)">
-      <strong>${name}</strong> panel — coming online in the next commit.
+  if (!panel) return;
+  if (TAB_MODULES[name]) {
+    const mod = await TAB_MODULES[name]();
+    await mod.render(panel);
+  } else if (!panel.dataset.rendered) {
+    panel.innerHTML = `<p class="dim">
+      <strong>${name}</strong> — landing in an upcoming commit.
     </p>`;
     panel.dataset.rendered = "1";
   }
