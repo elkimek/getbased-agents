@@ -55,6 +55,40 @@ def test_auth_check_accepts_right_key(client: TestClient) -> None:
     assert r.json() == {"ok": True}
 
 
+def test_reveal_api_key_requires_auth(client: TestClient) -> None:
+    assert client.get("/api/auth/api-key").status_code == 401
+
+
+def test_reveal_api_key_returns_plaintext_when_authed(
+    client: TestClient, key_file
+) -> None:
+    """The UI's show/copy buttons hit this endpoint to reveal the
+    bearer token. The caller is already authenticated with the same
+    key, so returning it isn't an escalation — just saves them a
+    terminal round-trip to run `lens key`."""
+    r = client.get(
+        "/api/auth/api-key",
+        headers={"Authorization": "Bearer test-dashboard-key"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["api_key"] == "test-dashboard-key"
+    assert body["api_key_file"] == str(key_file)
+
+
+def test_reveal_api_key_tracks_on_disk_rotation(
+    client: TestClient, key_file
+) -> None:
+    """Rotating the key file on disk without restarting the dashboard
+    should flow through — the endpoint reads fresh per call."""
+    key_file.write_text("rotated-key")
+    r = client.get(
+        "/api/auth/api-key", headers={"Authorization": "Bearer rotated-key"}
+    )
+    assert r.status_code == 200
+    assert r.json()["api_key"] == "rotated-key"
+
+
 def test_auth_check_503_when_no_key_on_disk(tmp_path: Path) -> None:
     """If there's no key file at all, dashboard can't authenticate anyone
     — return 503 (service misconfigured) rather than 401 so the frontend

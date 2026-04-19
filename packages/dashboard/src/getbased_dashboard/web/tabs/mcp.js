@@ -96,6 +96,12 @@ async function loadEnv(root) {
       <div class="kv-v"><code>${esc(e.lens_url)}</code></div>
       <div class="kv-k">LENS_API_KEY_FILE</div>
       <div class="kv-v"><code>${esc(e.lens_api_key_file)}</code> ${e.lens_api_key_present ? '<span class="badge ok">present</span>' : '<span class="badge err">missing</span>'}</div>
+      <div class="kv-k" title="The bearer token rag generated on first start. Paste into the getbased PWA's External server field or into an AI client's MCP config.">LENS_API_KEY</div>
+      <div class="kv-v">
+        <code id="api-key-value">${'\u2022'.repeat(32)}</code>
+        <button type="button" id="reveal-api-key" class="ghost" style="font-size:10px;padding:2px 8px">show</button>
+        <button type="button" id="copy-api-key" class="ghost" style="font-size:10px;padding:2px 8px">copy</button>
+      </div>
       <div class="kv-k">GETBASED_GATEWAY</div>
       <div class="kv-v"><code>${esc(e.getbased_gateway)}</code></div>
       <div class="kv-k" title="The MCP reads GETBASED_TOKEN from the env of whatever launches it (Claude Desktop, Hermes, Claude Code, etc). This row reflects the dashboard's own env — i.e. what a locally-spawned MCP would inherit. In production, the token goes in the client's config file, not here.">GETBASED_TOKEN</div>
@@ -148,9 +154,68 @@ async function runTest(root) {
   }
 }
 
+async function _fetchApiKey() {
+  const r = await j("/api/auth/api-key");
+  return r.api_key || "";
+}
+
+function _maskKey(n) {
+  return "\u2022".repeat(Math.max(8, n));
+}
+
 function wireHandlers(root) {
   root.querySelector("#refresh-env").addEventListener("click", () => loadEnv(root));
   root.querySelector("#client-picker").addEventListener("change", () => loadConfig(root));
+
+  // API key show/copy — re-bound every render since loadEnv rewrites
+  // the panel. `revealedAt` drives auto-remask; 15s feels right for
+  // "glance, paste, hide" without being annoying if the user wanted
+  // longer.
+  const revealBtn = root.querySelector("#reveal-api-key");
+  const copyKeyBtn = root.querySelector("#copy-api-key");
+  const keyEl = root.querySelector("#api-key-value");
+  let revealTimer = null;
+  if (revealBtn && keyEl) {
+    revealBtn.addEventListener("click", async () => {
+      if (revealBtn.textContent === "hide") {
+        keyEl.textContent = _maskKey(32);
+        revealBtn.textContent = "show";
+        if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+        return;
+      }
+      try {
+        const key = await _fetchApiKey();
+        if (!key) { keyEl.textContent = "(empty — rag never started?)"; return; }
+        keyEl.textContent = key;
+        revealBtn.textContent = "hide";
+        if (revealTimer) clearTimeout(revealTimer);
+        revealTimer = setTimeout(() => {
+          keyEl.textContent = _maskKey(32);
+          revealBtn.textContent = "show";
+          revealTimer = null;
+        }, 15_000);
+      } catch (err) {
+        keyEl.textContent = `(error: ${err.message})`;
+      }
+    });
+  }
+  if (copyKeyBtn) {
+    copyKeyBtn.addEventListener("click", async () => {
+      try {
+        const key = await _fetchApiKey();
+        if (!key) return;
+        await navigator.clipboard.writeText(key);
+        const prev = copyKeyBtn.textContent;
+        copyKeyBtn.textContent = "copied ✓";
+        setTimeout(() => (copyKeyBtn.textContent = prev), 1200);
+      } catch (err) {
+        // Fall back to alert/modal — clipboard blocked in insecure
+        // context (http non-localhost) or user denied permission.
+        const { showAlert } = await import("../modals.js");
+        await showAlert("Copy failed — reveal the key and select it manually.", { tone: "error" });
+      }
+    });
+  }
   // Guard against rapid double-clicks spawning two MCP subprocesses
   // concurrently — each spawn is ~500ms and pays a startup cost, so
   // letting users queue them up achieves nothing useful.

@@ -127,6 +127,23 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         _require_auth(request, cfg)
         return {"ok": True}
 
+    @app.get("/api/auth/api-key")
+    async def reveal_api_key(request: Request) -> dict:
+        """Return the rag API key in plaintext so the UI can surface a
+        show/copy affordance. Authed — the caller is already holding
+        the key (they typed it at the auth gate), so this isn't an
+        escalation; it's a convenience for pasting the same key into
+        the PWA's External server field or a client MCP config.
+
+        The key is read fresh from disk per request, matching the
+        bearer-check pattern. If the user rotates the file without a
+        restart, the revealed value tracks the current on-disk secret."""
+        _require_auth(request, cfg)
+        return {
+            "api_key": cfg.read_api_key(),
+            "api_key_file": str(cfg.api_key_file),
+        }
+
     # Register per-tab API routers. Imported here (inside the factory) so
     # the dashboard doesn't pay the import cost of, say, httpx+multipart
     # when a test builds a bare app to probe auth-only endpoints.

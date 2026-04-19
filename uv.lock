@@ -494,7 +494,7 @@ wheels = [
 
 [[package]]
 name = "getbased-agent-stack"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/stack" }
 dependencies = [
     { name = "getbased-dashboard" },
@@ -526,7 +526,7 @@ provides-extras = ["full", "test"]
 
 [[package]]
 name = "getbased-dashboard"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "packages/dashboard" }
 dependencies = [
     { name = "fastapi" },
