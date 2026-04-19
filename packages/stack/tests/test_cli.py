@@ -178,6 +178,24 @@ def test_status_masks_secrets(stack_home, fake_shell):
     assert "****" in out
 
 
+def test_status_shows_path_values_verbatim(stack_home, fake_shell):
+    """File-path env vars (LENS_API_KEY_FILE, LENS_DATA_DIR) must not be
+    masked — they are paths, not secrets. Earlier the KEY-in-name heuristic
+    masked LENS_API_KEY_FILE into `****_key`, which hid debugging info."""
+    env_file.write_env_file(
+        {
+            "LENS_API_KEY_FILE": "/home/alice/.local/share/getbased/lens/api_key",
+            "LENS_DATA_DIR": "/data/lens",
+            "LENS_URL": "http://rag:8322",
+        }
+    )
+    rc, out, _ = _run(["status"])
+    assert rc == 0
+    assert "/home/alice/.local/share/getbased/lens/api_key" in out
+    assert "/data/lens" in out
+    assert "****" not in out
+
+
 # ── mcp-config ────────────────────────────────────────────────────────
 
 

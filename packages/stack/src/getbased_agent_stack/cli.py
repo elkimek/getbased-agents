@@ -59,6 +59,18 @@ def _prompt(msg: str, default: str = "", secret: bool = False) -> str:
     return answer.strip() or default
 
 
+def _display_value(key: str, value: str) -> str:
+    """Mask only actual secrets (a variable NAMED token/key/secret/password).
+    Keys like LENS_API_KEY_FILE that hold a path, not a secret, show verbatim."""
+    upper = key.upper()
+    # Values that end with _FILE or _PATH are filesystem paths — show them.
+    if upper.endswith(("_FILE", "_PATH", "_DIR", "_HOME", "_URL")):
+        return value
+    if any(upper.endswith("_" + s) or upper == s for s in ("TOKEN", "KEY", "SECRET", "PASSWORD")):
+        return "****" + value[-4:] if len(value) > 4 else "****"
+    return value
+
+
 def _yesno(msg: str, default: bool = True) -> bool:
     suffix = "[Y/n]" if default else "[y/N]"
     try:
@@ -187,14 +199,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     # env file
     path = env_file.env_file_path()
     if path.exists():
-        keys = sorted(env_file.read_env_file(path).keys())
+        data = env_file.read_env_file(path)
+        keys = sorted(data.keys())
         print(f"env file: {path}  ({len(keys)} keys)")
         for k in keys:
-            value = env_file.read_env_file(path)[k]
-            # Mask anything that looks sensitive
-            if any(s in k.upper() for s in ("TOKEN", "KEY", "SECRET", "PASSWORD")):
-                value = "****" + value[-4:] if len(value) > 4 else "****"
-            print(f"  {k}={value}")
+            print(f"  {k}={_display_value(k, data[k])}")
     else:
         print(f"env file: {path} (not present — run `getbased-stack init`)")
 
