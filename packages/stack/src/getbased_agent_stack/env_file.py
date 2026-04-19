@@ -66,6 +66,13 @@ def write_env_file(
     Creates parent dir if missing. Overwrites — call read_env_file first +
     merge if you want to preserve existing keys. Values are never quoted;
     reader handles quoting-or-not symmetrically.
+
+    Caveat: systemd's `EnvironmentFile=` parser has stricter quoting rules
+    than our Python loader — values containing whitespace or shell
+    metacharacters should be avoided. Our default values (tokens,
+    URL-safe paths) are already safe; users passing arbitrary values via
+    `getbased-stack set FOO="has spaces"` may see systemd-loaded services
+    and directly-invoked CLIs parse the value differently.
     """
     p = path or env_file_path()
     p.parent.mkdir(parents=True, exist_ok=True)

@@ -88,6 +88,38 @@ def test_fallback_when_binary_not_on_path():
     assert payload["mcpServers"]["getbased"]["command"] == "getbased-mcp"
 
 
+@pytest.mark.parametrize("client", ["claude-desktop", "claude-code", "cursor", "cline"])
+def test_fallback_emits_warning_for_json_clients(client):
+    """GUI-launched MCP clients don't inherit shell PATH, so a bare
+    binary name won't resolve. When we can't find an absolute path, the
+    snippet must warn the user explicitly — otherwise they'll debug a
+    silent failure."""
+    out = mcp_configs.emit(client, resolver=_fake_resolver(found=None))
+    assert "WARNING" in out
+    assert "absolute path" in out
+
+
+def test_fallback_emits_warning_for_hermes():
+    out = mcp_configs.emit("hermes", resolver=_fake_resolver(found=None))
+    assert "WARNING" in out
+
+
+def test_no_warning_when_binary_resolved():
+    """When shutil.which does find the binary, the warning banner must
+    not appear — we don't want to cry wolf on successful installs."""
+    for client in mcp_configs.SUPPORTED_CLIENTS:
+        out = mcp_configs.emit(client, resolver=_fake_resolver())
+        assert "WARNING" not in out
+
+
+def test_resolver_warning_absolute_paths():
+    """Unix and Windows-style absolute paths should both be recognized
+    as resolved."""
+    assert mcp_configs._resolver_warning("/usr/bin/getbased-mcp") is None
+    assert mcp_configs._resolver_warning("C:\\bin\\getbased-mcp.exe") is None
+    assert mcp_configs._resolver_warning("getbased-mcp") is not None
+
+
 def test_unknown_client_raises():
     with pytest.raises(ValueError, match="unknown client"):
         mcp_configs.emit("vim", resolver=_fake_resolver())

@@ -1,6 +1,6 @@
 # getbased-agent-stack
 
-Meta-package bundling the full [getbased](https://getbased.health) agent stack into one install: the MCP adapter, the RAG engine, the browser dashboard, a thin discovery CLI, a hardened systemd unit, and example configs for Claude Code + Hermes.
+Meta-package bundling the full [getbased](https://getbased.health) agent stack into one install: the MCP adapter, the RAG engine, the browser dashboard, an orchestration CLI (`init` / `install` / `mcp-config`), hardened systemd units for rag + dashboard, and paste-ready configs for Claude Desktop/Code, Cursor, Cline, and Hermes.
 
 Part of the [getbased-agents monorepo](https://github.com/elkimek/getbased-agents).
 
@@ -53,7 +53,7 @@ Login URL with bearer key:
 getbased-dashboard login-url   # prints http://127.0.0.1:8323/?key=...
 ```
 
-Upload docs, create libraries, rotate the sync token — all from the web UI.
+Upload docs, create libraries, manage sources, and test the MCP probe from the web UI. Rotate the sync token from the CLI (see below) or by editing `~/.config/getbased/env` directly.
 
 ### Surviving reboot on headless hosts
 
@@ -107,6 +107,7 @@ The dashboard is likewise stateless — it proxies rag for Knowledge operations,
 |---|---|---|---|---|
 | 0.1.x | ≥0.2.0 | ≥0.1.0 | — | v1 (multi-library) |
 | 0.2.x | ≥0.2.2 | ≥0.6.0 | ≥0.5.0 | v1 (+ streaming ingest, per-library models) |
+| 0.4.x | ≥0.2.3 | ≥0.7.1 | ≥0.6.1 | v1 (+ shared env file, `getbased-stack init`, systemd units) |
 
 Bump the meta's major when sibling protocols break; bump siblings freely for normal features.
 
