@@ -66,10 +66,14 @@ def _read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     if suffix == ".pdf":
         try:
-            from PyPDF2 import PdfReader  # type: ignore
+            # `pypdf` is the successor to PyPDF2 (same codebase, renamed).
+            # Every PyPDF2 release ≤ 3.0.1 carries an unfixed infinite-loop
+            # CVE (never patched — fixes landed in pypdf 3.9+), so we use
+            # pypdf and never depend on PyPDF2.
+            from pypdf import PdfReader  # type: ignore
         except ImportError:
             raise RuntimeError(
-                "PDF ingest requires PyPDF2. Install lens with: pip install 'getbased-lens[pdf]'"
+                "PDF ingest requires pypdf. Install lens with: pip install 'getbased-rag[pdf]'"
             )
         reader = PdfReader(str(path))
         return "\n\n".join(page.extract_text() or "" for page in reader.pages)

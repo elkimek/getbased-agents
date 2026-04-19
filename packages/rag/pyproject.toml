@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-rag"
-version = "0.6.0"
+version = "0.6.1"
 description = "getbased-rag — standalone RAG knowledge server (formerly the Electron-bundled Lens)"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -22,14 +22,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pdf = ["PyPDF2>=3.0"]
+pdf = ["pypdf>=3.9"]
 docx = ["python-docx>=1.0"]
 onnx = [
     "onnxruntime>=1.17",
     "optimum[onnxruntime]>=1.17",
-    "transformers>=4.38",
+    # transformers <5.0.0 had CVE in the Trainer class (we don't use it, but
+    # pin out of the vulnerable range so Dependabot stops firing).
+    "transformers>=5.0",
 ]
-full = ["PyPDF2>=3.0", "python-docx>=1.0", "onnxruntime>=1.17", "optimum[onnxruntime]>=1.17", "transformers>=4.38"]
+full = ["pypdf>=3.9", "python-docx>=1.0", "onnxruntime>=1.17", "optimum[onnxruntime]>=1.17", "transformers>=5.0"]
 test = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.scripts]
