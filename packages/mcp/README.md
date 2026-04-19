@@ -180,6 +180,7 @@ Ask about your labs in any connected conversation:
 | `LENS_URL` | No | RAG server URL (default: `http://localhost:8322`). Overrides `LENS_PORT` |
 | `LENS_PORT` | No | RAG server port, only used to build default `LENS_URL` (default: `8322`) |
 | `LENS_API_KEY_FILE` | No | Path to RAG API key file. Default: `$XDG_DATA_HOME/getbased/lens/api_key` (getbased-rag's canonical location). If that file doesn't exist but the legacy `~/.hermes/rag/lens_api_key` does, the legacy path is used instead — upgrades from standalone `getbased-mcp` ≤ 0.1.0 keep working without config changes. |
+| `LENS_MCP_ACTIVITY_LOG` | No | JSONL path where tool-call activity is appended. Default: `$XDG_STATE_HOME/getbased/mcp/activity.jsonl`. Each record: `{ts, tool, duration_ms, ok, error?}` — arguments are never logged (queries may contain sensitive health info). Set to `off` / `false` / `0` to disable. The [getbased-dashboard](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard) Activity tab tails this file. |
 
 ## Custom Knowledge Source (getbased app)
 

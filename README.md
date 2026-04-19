@@ -53,8 +53,8 @@ Each package runs its own tests from its own directory:
 
 ```bash
 (cd packages/mcp && uv run pytest)       # 33 unit tests, respx-mocked HTTP
-(cd packages/rag && uv run pytest)       # 33 tests, FastAPI TestClient + fake embedder
-(cd packages/dashboard && uv run pytest) # 58 tests, respx-mocked rag + real-subprocess MCP probe
+(cd packages/rag && uv run pytest)       # 51 tests, FastAPI TestClient + fake embedder
+(cd packages/dashboard && uv run pytest) # 64 tests, respx-mocked rag + real-subprocess MCP probe
 (cd packages/stack && uv run pytest)     # 2 integration tests: real lens subprocess + real MCP tool calls
 ```
 
