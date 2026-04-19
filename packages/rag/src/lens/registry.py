@@ -119,6 +119,14 @@ class Registry:
     def create(self, name: str) -> dict:
         name = (name or "").strip() or "Untitled"
         state = self._load()
+        # Reject duplicate names outright — prevents rapid double-submit
+        # from creating N libraries with the same label. Client-side
+        # guards help but can't bulletproof across DOM re-renders; the
+        # authoritative check lives here. Case-insensitive so "Research"
+        # and "research" collide.
+        for existing in state["libraries"]:
+            if existing.get("name", "").strip().lower() == name.lower():
+                raise ValueError(f"A library named {name!r} already exists")
         lib = {"id": _new_id(), "name": name, "createdAt": int(time.time() * 1000)}
         state["libraries"].append(lib)
         if not state["activeId"]:

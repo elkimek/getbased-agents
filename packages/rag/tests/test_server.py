@@ -239,6 +239,24 @@ def test_rename_nonexistent_library_returns_404(client: TestClient, auth: dict) 
     assert r.status_code == 404
 
 
+def test_duplicate_library_name_rejected(client: TestClient, auth: dict) -> None:
+    """Rapid double-submit from a browser (UI guards help but can't
+    bulletproof across DOM re-renders) should not produce duplicate
+    libraries. Server enforces unique names with 409 Conflict."""
+    r1 = client.post("/libraries", json={"name": "Research"}, headers=auth)
+    assert r1.status_code == 200
+    r2 = client.post("/libraries", json={"name": "Research"}, headers=auth)
+    assert r2.status_code == 409
+    assert "already exists" in r2.json().get("error", "")
+    # Case-insensitive match — "research" also conflicts
+    r3 = client.post("/libraries", json={"name": "research"}, headers=auth)
+    assert r3.status_code == 409
+    # Confirm only one library exists with that name
+    state = client.get("/libraries", headers=auth).json()
+    names = [l["name"] for l in state["libraries"]]
+    assert names.count("Research") == 1
+
+
 # ── Security hardening — input validation, CORS, error sanitisation ───
 
 def test_query_rejects_overlong_string(client: TestClient, auth: dict) -> None:

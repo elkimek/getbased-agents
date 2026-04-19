@@ -510,7 +510,7 @@ provides-extras = ["full", "test"]
 
 [[package]]
 name = "getbased-dashboard"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/dashboard" }
 dependencies = [
     { name = "fastapi" },
@@ -572,7 +572,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "getbased-rag"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/rag" }
 dependencies = [
     { name = "fastapi" },

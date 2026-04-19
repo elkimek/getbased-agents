@@ -424,7 +424,13 @@ def create_app(config: LensConfig) -> FastAPI:
         authorization: Optional[str] = Header(default=None),
     ):
         require_auth(authorization)
-        lib = registry.create(req.name)
+        try:
+            lib = registry.create(req.name)
+        except ValueError as e:
+            # Registry raises ValueError for duplicate names — surface
+            # as 409 Conflict so callers can distinguish "already exists"
+            # from validation errors.
+            raise HTTPException(409, str(e))
         return {"library": lib, "state": registry.list()}
 
     @app.post("/libraries/{library_id}/activate")

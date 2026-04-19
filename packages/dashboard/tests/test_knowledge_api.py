@@ -189,6 +189,44 @@ def test_validation_errors_come_back_as_flat_string(client: TestClient) -> None:
     assert len(body["error"]) > 0
 
 
+@respx.mock
+def test_rag_422_validation_error_flattens_through_proxy(client: TestClient) -> None:
+    """When rag returns a 422 with its default `{detail: [{...}]}` shape
+    (rag's exception_handler only wraps HTTPException, not Pydantic
+    RequestValidationError), the dashboard's own handler receives that
+    dict as `exc.detail`. A naive flattener would str(dict) it — we need
+    to recurse into the `detail` key and render the inner list as a
+    readable line. Regression for the H3 partial that ran all the way
+    through proxy + upstream validation."""
+    # Simulate rag returning the default FastAPI validation envelope.
+    respx.post(f"{RAG_BASE}/query").mock(
+        return_value=Response(
+            422,
+            json={
+                "detail": [
+                    {
+                        "type": "string_too_short",
+                        "loc": ["body", "query"],
+                        "msg": "String should have at least 1 character",
+                    }
+                ]
+            },
+        )
+    )
+    r = client.post(
+        "/api/knowledge/search", headers=AUTH, json={"query": "", "top_k": 3}
+    )
+    assert r.status_code == 422
+    body = r.json()
+    assert isinstance(body["error"], str)
+    # Should contain the human-readable field-level message, not a dict repr
+    assert "body.query" in body["error"]
+    assert "at least 1 character" in body["error"]
+    # And should NOT contain the raw dict representation
+    assert "'detail'" not in body["error"]
+    assert "'type'" not in body["error"]
+
+
 # ─── Ingest upload proxy ─────────────────────────────────────────────
 
 @respx.mock

@@ -78,6 +78,19 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
                 else:
                     parts.append(str(item))
             return "; ".join(parts) or "validation failed"
+        if isinstance(detail, dict):
+            # FastAPI's default validation envelope is {"detail": [{...}]}.
+            # When we proxy a 422 from rag (which doesn't register its own
+            # RequestValidationError handler), that whole dict lands here
+            # as `exc.detail`. Recurse one level into the `detail` key so
+            # the user sees "body.query: String should have at least 1
+            # character" instead of a Python-repr'd dict.
+            if "detail" in detail:
+                return _flatten_detail(detail["detail"])
+            if "error" in detail:
+                return _flatten_detail(detail["error"])
+            if "msg" in detail:
+                return str(detail["msg"])
         return str(detail)
 
     @app.exception_handler(HTTPException)
