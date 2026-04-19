@@ -362,9 +362,26 @@ def create_app(config: LensConfig) -> FastAPI:
         if not files:
             raise HTTPException(400, "No files uploaded")
 
-        total_bytes = 0
-        with tempfile.TemporaryDirectory(prefix="lens-ingest-") as tmpdir:
-            tmp_path = Path(tmpdir)
+        accept = (request.headers.get("accept") or "").lower()
+        want_stream = "application/x-ndjson" in accept
+
+        # Create tempdir WITHOUT a `with` block — streaming needs the
+        # directory to outlive the handler return. Cleanup is explicit,
+        # either at end-of-handler (single-shot path) or in the generator's
+        # finally (streaming path). The older `with tempfile.TemporaryDirectory`
+        # pattern deleted the dir before the response generator ran, which
+        # either crashed ingest (FileNotFoundError) or forced us to
+        # pre-buffer every event — defeating streaming.
+        tmpdir = tempfile.mkdtemp(prefix="lens-ingest-")
+        tmp_path = Path(tmpdir)
+
+        def _cleanup_tmpdir() -> None:
+            import shutil as _shutil
+
+            _shutil.rmtree(tmpdir, ignore_errors=True)
+
+        try:
+            total_bytes = 0
             written_any = False
             for upload in files:
                 # Strip any directory components — treat the client-supplied
@@ -391,86 +408,97 @@ def create_app(config: LensConfig) -> FastAPI:
 
             if not written_any:
                 raise HTTPException(400, "No valid files in upload")
+        except HTTPException:
+            _cleanup_tmpdir()
+            raise
+        except Exception:
+            _cleanup_tmpdir()
+            raise
 
-            # Import lazily — ingest pulls in heavy deps (embedder,
-            # optional PDF/DOCX parsers) that we don't want to pay for on
-            # server import if ingest is never called.
-            from .ingest import ingest_path
+        # Import lazily — ingest pulls in heavy deps (embedder, optional
+        # PDF/DOCX parsers) that we don't want to pay for on server
+        # import if ingest is never called.
+        from .ingest import ingest_path
 
-            # Reuse the server's live store + embedder + backend so we
-            # don't race the server's QdrantBackend for the local Qdrant
-            # file lock. Creating a fresh QdrantBackend in the ingest
-            # path would fail with AlreadyLocked whenever the server is
-            # up, which is the normal case.
-            store_obj = active_store()
-            embedder_obj = get_embedder()
-            backend_obj = _get_backend()
+        # Reuse the server's live store + embedder + backend so we don't
+        # race the server's QdrantBackend for the local Qdrant file lock.
+        store_obj = active_store()
+        embedder_obj = get_embedder()
+        backend_obj = _get_backend()
 
-            # Stream NDJSON when the client asks for it — UI can draw a
-            # live progress bar over a long ingest instead of spinning.
-            accept = (request.headers.get("accept") or "").lower()
-            want_stream = "application/x-ndjson" in accept
+        if want_stream:
+            import asyncio as _asyncio
 
-            if want_stream:
-                # Run ingest to completion inside the tempdir scope,
-                # collecting progress events as they fire. Buffering is
-                # tiny (one dict per file) compared to the upload — a
-                # 1000-file ingest is ~200 KB of events total. This lets
-                # us safely delete the tempdir when we return while still
-                # letting the UI render a progress bar from the replay.
-                import asyncio as _asyncio
+            queue: _asyncio.Queue = _asyncio.Queue()
+            _SENTINEL = object()
+            loop = _asyncio.get_running_loop()
 
-                events: list[dict] = []
-                loop = _asyncio.get_running_loop()
+            def _sync_on_event(evt: dict) -> None:
+                # Called from the worker thread. Hand the event to the
+                # asyncio loop's queue without blocking it.
+                loop.call_soon_threadsafe(queue.put_nowait, evt)
 
-                def _sync_on_event(evt: dict) -> None:
-                    # Called from the worker thread — hop back to the
-                    # loop to append so we don't race on the list (CPython
-                    # list.append is atomic but this keeps things tidy).
-                    loop.call_soon_threadsafe(events.append, evt)
-
+            async def _run_ingest() -> None:
                 try:
                     result = await _asyncio.to_thread(
                         ingest_path,
                         config,
                         tmp_path,
-                        False,  # emit_progress (stdout) — use callback instead
+                        False,  # emit_progress (stdout) — use callback
                         store_obj,
                         embedder_obj,
                         backend_obj,
                         _sync_on_event,
                     )
-                    events.append({"event": "result", **result})
+                    queue.put_nowait({"event": "result", **result})
                 except FileNotFoundError as e:
-                    events.append({"event": "error", "message": str(e)})
+                    queue.put_nowait({"event": "error", "message": str(e)})
                 except Exception:
                     log.exception("Streaming ingest failed")
-                    events.append(
+                    queue.put_nowait(
                         {"event": "error", "message": "ingest failed — see server logs"}
                     )
+                finally:
+                    queue.put_nowait(_SENTINEL)
 
-                def _gen():
-                    for evt in events:
-                        yield (json.dumps(evt) + "\n").encode()
+            async def _ndjson_gen():
+                task = _asyncio.create_task(_run_ingest())
+                try:
+                    while True:
+                        item = await queue.get()
+                        if item is _SENTINEL:
+                            break
+                        yield (json.dumps(item) + "\n").encode()
+                finally:
+                    # If the client disconnected early, cancel + wait.
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except (_asyncio.CancelledError, Exception):
+                            pass
+                    _cleanup_tmpdir()
 
-                return StreamingResponse(
-                    _gen(), media_type="application/x-ndjson"
-                )
+            return StreamingResponse(
+                _ndjson_gen(), media_type="application/x-ndjson"
+            )
 
-            # Default: single-shot JSON (backward compatible).
-            try:
-                result = ingest_path(
-                    config,
-                    tmp_path,
-                    store=store_obj,
-                    embedder=embedder_obj,
-                    backend=backend_obj,
-                )
-            except FileNotFoundError as e:
-                raise HTTPException(400, str(e))
-            except Exception:
-                log.exception("Ingest failed")
-                raise HTTPException(500, "Ingest failed — see server logs")
+        # Default: single-shot JSON (backward compatible).
+        try:
+            result = ingest_path(
+                config,
+                tmp_path,
+                store=store_obj,
+                embedder=embedder_obj,
+                backend=backend_obj,
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(400, str(e))
+        except Exception:
+            log.exception("Ingest failed")
+            raise HTTPException(500, "Ingest failed — see server logs")
+        finally:
+            _cleanup_tmpdir()
 
         return result
 
