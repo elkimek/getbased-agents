@@ -40,10 +40,7 @@ function _ensurePill() {
     </div>
     <div class="pill-status">Preparing…</div>
     <progress class="pill-progress" value="0" max="1"></progress>
-    <div class="pill-sub">
-      <span class="pill-count">0 / 0</span>
-      <span class="pill-rate"></span>
-    </div>
+    <div class="pill-count">0 / 0</div>
     <button class="pill-cancel" type="button">Cancel</button>
   `;
   document.body.appendChild(el);
@@ -83,9 +80,11 @@ function _pillUpdate({ status, rate, index, total }) {
     const bar = _pill.querySelector(".pill-progress");
     bar.max = Math.max(1, total);
     bar.value = Math.min(total, index || 0);
-    _pill.querySelector(".pill-count").textContent = `${index || 0} / ${total}`;
+    // Compact single-line sub matches the PWA: "12/16 · 3.2/s".
+    const countText = `${(index || 0).toLocaleString()} / ${total.toLocaleString()}`;
+    const rateText = rate ? ` · ${rate}` : "";
+    _pill.querySelector(".pill-count").textContent = countText + rateText;
   }
-  _pill.querySelector(".pill-rate").textContent = rate != null ? rate : "";
 }
 
 function _pillComplete(message, kind) {
@@ -199,10 +198,23 @@ async function runIngest(fd, onSuccess) {
     return;
   }
 
-  const skipped = (final.skipped || []).length;
+  const skippedList = final.skipped || [];
+  const skipped = skippedList.length;
   const skippedSuffix = skipped ? ` (skipped ${skipped})` : "";
-  const msg = `Indexed ${final.chunks_indexed} excerpt${final.chunks_indexed === 1 ? "" : "s"} from ${final.files_seen} file${final.files_seen === 1 ? "" : "s"} in ${dur}s${skippedSuffix}.`;
+  const msg = `Indexed ${final.chunks_indexed.toLocaleString()} excerpt${final.chunks_indexed === 1 ? "" : "s"} from ${final.files_seen} file${final.files_seen === 1 ? "" : "s"} in ${dur}s${skippedSuffix}.`;
   _pillComplete(msg, "ok");
+  // If any files were skipped, offer the user a look at the names —
+  // otherwise a silent "Skipped: 7" hides which files the parser
+  // couldn't handle. Show a tooltip on the pill with the list,
+  // truncated to the first ~12 entries to keep it readable.
+  if (skipped && _pill) {
+    const preview = skippedList
+      .slice(0, 12)
+      .map((p) => p.split("/").pop())
+      .join("\n");
+    const more = skipped > 12 ? `\n…and ${skipped - 12} more` : "";
+    _pill.querySelector(".pill-status").title = `Skipped:\n${preview}${more}`;
+  }
   if (onSuccess) onSuccess();
 }
 
@@ -387,12 +399,19 @@ function renderLibraries(root) {
     ? `<label class="model-picker">model <select name="embedding_model">${modelOptions}</select></label>`
     : "";
 
-  const sourceRows = (_stats.documents || [])
+  // Sort sources by chunk count desc so the largest contributors
+  // surface first — matches how users typically reason about their
+  // corpus ("what's taking up space"). Ties break alphabetically.
+  const sortedSources = [..._stats.documents || []].sort((a, b) => {
+    if (b.chunks !== a.chunks) return (b.chunks || 0) - (a.chunks || 0);
+    return (a.source || "").localeCompare(b.source || "");
+  });
+  const sourceRows = sortedSources
     .map(
       (d) => `
         <li class="src-row">
-          <div class="src-chunks">${d.chunks}</div>
-          <div class="src-name">${esc(d.source)}</div>
+          <div class="src-chunks">${(d.chunks || 0).toLocaleString()}</div>
+          <div class="src-name" title="${esc(d.source)}">${esc(d.source)}</div>
           <button class="danger small" data-act="del-source" data-source="${esc(d.source)}">delete</button>
         </li>
       `
@@ -411,7 +430,7 @@ function renderLibraries(root) {
         </form>
       </div>
       <p class="panel-sub" style="margin: -4px 0 12px">Each library is pinned to its model at creation — vectors are dim-locked and can't be switched later.</p>
-      <ul class="lib-list">${rows || '<li class="empty">No libraries yet — create one above.</li>'}</ul>
+      <ul class="lib-list">${rows || '<li class="empty">No libraries yet — create one above to get started.</li>'}</ul>
     </section>
 
     <section class="panel">
@@ -420,7 +439,13 @@ function renderLibraries(root) {
         <div class="panel-sub">Drop files into the active library</div>
       </div>
       <div id="drop-zone" class="drop-zone">
-        <p>Drag &amp; drop .md / .txt / .pdf / .docx / .zip here, or <button type="button" id="pick-files-btn" class="link">pick files</button></p>
+        <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        <p>Drag &amp; drop files here, or <button type="button" id="pick-files-btn" class="link">pick files</button></p>
+        <p class="drop-hint">.md · .txt · .markdown · .rst · .pdf · .docx · .zip</p>
         <input type="file" id="file-input" class="visually-hidden" multiple />
       </div>
     </section>
@@ -443,7 +468,7 @@ function renderLibraries(root) {
           : ""}
       </div>
       <div class="stat-total">Total chunks: ${_stats.total_chunks}</div>
-      <ul class="src-list">${sourceRows || '<li class="empty">No sources indexed yet.</li>'}</ul>
+      <ul class="src-list">${sourceRows || '<li class="empty">No sources indexed yet — drop some files above.</li>'}</ul>
     </section>
   `;
 

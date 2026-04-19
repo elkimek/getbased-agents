@@ -228,12 +228,29 @@ code {
 .drop-zone {
   border: 2px dashed var(--border);
   border-radius: 8px;
-  padding: 32px 20px;
+  padding: 28px 20px;
   text-align: center;
   color: var(--text-dim);
   transition: border-color 0.12s, background 0.12s;
 }
 .drop-zone.hover { border-color: var(--accent); background: var(--bg); }
+.drop-zone .drop-icon {
+  display: block;
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 10px;
+  color: var(--text-dim);
+  transition: color 0.12s;
+}
+.drop-zone.hover .drop-icon { color: var(--accent); }
+.drop-zone p { margin: 0 0 4px; font-size: 13px; }
+.drop-zone .drop-hint {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.7;
+  margin: 2px 0 0;
+}
 .drop-zone .link {
   color: var(--accent);
   cursor: pointer;
@@ -335,16 +352,13 @@ code {
 }
 .ingest-pill.err .pill-progress::-webkit-progress-value { background: var(--danger); }
 .ingest-pill.err .pill-progress::-moz-progress-bar { background: var(--danger); }
-.pill-sub {
-  display: flex;
-  justify-content: space-between;
+.pill-count {
   font-size: 11px;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
   margin-bottom: 10px;
+  font-family: ui-monospace, Menlo, monospace;
 }
-.pill-rate { color: var(--accent); font-weight: 500; }
-.ingest-pill.err .pill-rate { color: var(--danger); }
 .pill-cancel {
   width: 100%;
   background: transparent;
