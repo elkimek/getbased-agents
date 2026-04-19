@@ -132,6 +132,13 @@ class OnnxEmbedder(Embedder):
         self._dim: int | None = None
         self._needs_token_type_ids = False
         self._max_seq_len = 512  # overridden per-model on load
+        # Load is lazy + one-shot; guard with a lock so concurrent
+        # callers on a cold embedder don't both enter and race on
+        # self._session assignment. First caller wins the download;
+        # others wait on the lock and take the hot path.
+        import threading
+
+        self._load_lock = threading.Lock()
 
     # lazy init --------------------------------------------------------
 
@@ -139,6 +146,14 @@ class OnnxEmbedder(Embedder):
         if self._session is not None:
             return
 
+        with self._load_lock:
+            # Re-check inside lock — another thread may have loaded
+            # while we were waiting.
+            if self._session is not None:
+                return
+            self._load_inside_lock()
+
+    def _load_inside_lock(self) -> None:
         import onnxruntime as ort
 
         providers = self._resolve_providers(ort)
@@ -172,8 +187,11 @@ class OnnxEmbedder(Embedder):
         tok_file = model_dir / "tokenizer.json"
         if not tok_file.exists():
             raise FileNotFoundError(
-                f"tokenizer.json not found in {model_dir}. The repo "
-                f"{self._onnx_repo!r} may not ship a fast tokenizer."
+                f"tokenizer.json not found in {model_dir}. Either the repo "
+                f"{self._onnx_repo!r} doesn't ship a fast tokenizer, or the "
+                f"download was partial — check LENS_DATA_DIR and retry. "
+                f"For custom models you can try setting LENS_EMBEDDING_MODEL "
+                f"to a repo we know ships ONNX (see _ONNX_REPO_MAP)."
             )
         self._tokenizer = Tokenizer.from_file(str(tok_file))
 
@@ -182,12 +200,70 @@ class OnnxEmbedder(Embedder):
         # heuristic.
         self._max_seq_len = self._detect_max_len(model_dir)
 
+        # Pad config per tokenizer — critical for correctness. BERT/MiniLM
+        # uses `[PAD]` id=0; XLM-RoBERTa (BGE-M3) uses `<pad>` id=1 and
+        # id=0 is `<s>`. Hard-coding `pad_id=0, pad_token="[PAD]"` on
+        # BGE-M3 would stuff `<s>` into padding positions — corrupting
+        # any batch with varying-length inputs. Read the actual values
+        # from tokenizer_config.json; fall back to probing known token
+        # strings when absent.
+        pad_token, pad_id = self._resolve_pad_config(model_dir)
+        self._tokenizer.enable_padding(pad_id=pad_id, pad_token=pad_token)
+        self._tokenizer.enable_truncation(max_length=self._max_seq_len)
+
         # Dimension: prefer known; else probe with a short input
         self._dim = self._detect_dimension()
         log.info(
-            "ONNX model ready (dim=%d, provider=%s, max_len=%d)",
-            self._dim, active[0], self._max_seq_len,
+            "ONNX model ready (dim=%d, provider=%s, max_len=%d, pad=%r/%d)",
+            self._dim, active[0], self._max_seq_len, pad_token, pad_id,
         )
+
+    def _resolve_pad_config(self, model_dir: Path) -> tuple[str, int]:
+        """Read pad_token + pad_token_id from tokenizer_config.json.
+        Handles both string form (`"[PAD]"`) and newer dict form
+        (`{"content": "<pad>", ...}`). Falls through to probing the
+        tokenizer's vocab for common pad strings when the config
+        doesn't declare one.
+        """
+        import json as _json
+
+        cfg_path = model_dir / "tokenizer_config.json"
+        pad_token = None
+        if cfg_path.exists():
+            try:
+                cfg = _json.loads(cfg_path.read_text())
+                raw = cfg.get("pad_token")
+                if isinstance(raw, str):
+                    pad_token = raw
+                elif isinstance(raw, dict):
+                    pad_token = raw.get("content")
+            except (ValueError, _json.JSONDecodeError):
+                pass
+
+        # Fallback: probe the tokenizer for any of the usual suspects.
+        if not pad_token:
+            for candidate in ("<pad>", "[PAD]", "<PAD>"):
+                if self._tokenizer.token_to_id(candidate) is not None:
+                    pad_token = candidate
+                    break
+        if not pad_token:
+            # Last resort — use the tokenizer's id=0 and warn. Almost
+            # no modern HF model leaves id=0 meaningful-but-unpaddable.
+            log.warning(
+                "No pad token found for %s; defaulting to id=0. "
+                "Batches with varying lengths may produce wrong vectors.",
+                self._model_name,
+            )
+            return ("[PAD]", 0)
+
+        pad_id = self._tokenizer.token_to_id(pad_token)
+        if pad_id is None:
+            log.warning(
+                "pad_token %r not in vocab for %s; defaulting to 0.",
+                pad_token, self._model_name,
+            )
+            return (pad_token, 0)
+        return (pad_token, pad_id)
 
     def _resolve_providers(self, ort) -> list[str]:
         available = ort.get_available_providers()
@@ -210,19 +286,27 @@ class OnnxEmbedder(Embedder):
     def _resolve_model_dir(self) -> Path:
         """Download (or reuse cached) ONNX model files from HuggingFace.
 
-        Uses huggingface_hub.snapshot_download with a tight allow_patterns
-        list — we only pull what we need (model.onnx, tokenizer.json,
-        config.json). Skips the conversion step entirely, so there's no
-        `/tmp` space requirement for `.onnx.data` files.
+        Writes into `{cache_root}/hub/models--{slug}/snapshots/{rev}/`
+        where `cache_root` comes from (in order):
+          1. `LENS_DATA_DIR/hf-cache` — scoped to the lens install so
+             users self-hosting on a VM keep models next to their
+             Qdrant data, not in the user's default HF cache
+          2. `HUGGINGFACE_HUB_CACHE` env var (authoritative HF override)
+          3. `HF_HOME/hub` (standard HF env var)
+          4. `~/.cache/huggingface/hub` (hard default)
 
-        Cache honours the standard HF_HOME / HUGGINGFACE_HUB_CACHE env
-        vars so models co-locate with any other HF-using tool on the
-        same machine.
+        Subsequent calls short-circuit via `_local_candidates()` —
+        same cache_root resolution, just reading instead of writing.
+        Matters for `LENS_DATA_DIR` self-hosts: without an explicit
+        `cache_dir=`, snapshot_download would write to the user's
+        default HF cache and our LENS_DATA_DIR search would never hit.
         """
-        # If already present in a known local location, use it — avoids
-        # a network touch every first-call.
-        for local in self._local_candidates():
-            if local and (local / "tokenizer.json").exists():
+        cache_dir = self._cache_root()
+
+        # Reuse if already present in the resolved cache or other
+        # standard locations — avoids a network touch every first-call.
+        for local in self._local_candidates(cache_dir):
+            if (local / "tokenizer.json").exists():
                 if self._find_onnx_file_silent(local) is not None:
                     log.info("Using cached ONNX model at %s", local)
                     return local
@@ -236,43 +320,71 @@ class OnnxEmbedder(Embedder):
                 "Install with: pip install 'getbased-rag[full]'"
             ) from e
 
-        log.info("Downloading ONNX weights from HF: %s", self._onnx_repo)
-        local = snapshot_download(
-            repo_id=self._onnx_repo,
-            allow_patterns=[
-                "onnx/model.onnx",
-                "onnx/model.onnx_data",
-                "onnx/model_quantized.onnx",
-                "model.onnx",
-                "model.onnx_data",
-                "tokenizer.json",
-                "tokenizer_config.json",
-                "config.json",
-                "special_tokens_map.json",
-            ],
+        log.info(
+            "Downloading ONNX weights from HF: %s (cache=%s)",
+            self._onnx_repo, cache_dir,
         )
+        try:
+            local = snapshot_download(
+                repo_id=self._onnx_repo,
+                cache_dir=str(cache_dir),
+                allow_patterns=[
+                    "onnx/model.onnx",
+                    "onnx/model.onnx_data",
+                    "onnx/model_quantized.onnx",
+                    "model.onnx",
+                    "model.onnx_data",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "config.json",
+                    "special_tokens_map.json",
+                ],
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to download ONNX weights for {self._onnx_repo!r}: {e}. "
+                f"Check network + HuggingFace status, or set "
+                f"LENS_EMBEDDING_MODEL to a model in the curated list."
+            ) from e
         return Path(local)
 
-    def _local_candidates(self) -> list[Path]:
-        """Candidate local paths to check before hitting the network."""
-        out: list[Path] = []
-        # LENS_DATA_DIR / models / models--{slug}/snapshots/{rev}/ —
-        # where huggingface_hub drops files when HF_HOME is set there.
+    def _cache_root(self) -> Path:
+        """Where ONNX weights get written + read. Honours LENS_DATA_DIR
+        first so self-hosted installs keep models next to the Qdrant
+        data dir (one rsync / backup target for the whole lens state)."""
         env_dir = os.environ.get("LENS_DATA_DIR")
         if env_dir:
-            models = Path(env_dir) / "models"
-            if models.exists():
-                out.extend(self._snapshot_dirs(models))
-        # Platform default getbased data dir
+            return Path(env_dir) / "hf-cache"
+        hub_cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
+        if hub_cache:
+            return Path(hub_cache).parent if Path(hub_cache).name == "hub" else Path(hub_cache)
+        hf_home = os.environ.get("HF_HOME")
+        if hf_home:
+            return Path(hf_home)
+        return Path.home() / ".cache" / "huggingface"
+
+    def _local_candidates(self, primary: Path) -> list[Path]:
+        """All snapshot dirs that might hold our ONNX files, in priority
+        order. `primary` is the write-target cache_root; we also scan
+        HF's default locations so a machine with an existing HF cache
+        doesn't re-download just because LENS_DATA_DIR points elsewhere."""
+        out: list[Path] = []
+        # 1. Primary (LENS_DATA_DIR or configured)
+        out.extend(self._snapshot_dirs(primary / "hub"))
+        # 2. Platform getbased data dir (legacy / Tauri layout)
         for d in _platform_getbased_data_dirs():
             if d.exists():
                 out.extend(self._snapshot_dirs(d))
-        # Standard HF hub cache
-        hf_cache = Path(
-            os.environ.get("HF_HOME", "") or Path.home() / ".cache" / "huggingface"
-        ) / "hub"
-        if hf_cache.exists():
-            out.extend(self._snapshot_dirs(hf_cache))
+        # 3. HUGGINGFACE_HUB_CACHE env var (HF-authoritative)
+        hub_env = os.environ.get("HUGGINGFACE_HUB_CACHE")
+        if hub_env:
+            out.extend(self._snapshot_dirs(Path(hub_env)))
+        # 4. HF_HOME/hub
+        hf_home = os.environ.get("HF_HOME")
+        if hf_home:
+            out.extend(self._snapshot_dirs(Path(hf_home) / "hub"))
+        # 5. Standard default
+        out.extend(self._snapshot_dirs(Path.home() / ".cache" / "huggingface" / "hub"))
         return out
 
     def _snapshot_dirs(self, root: Path) -> list[Path]:
@@ -348,12 +460,11 @@ class OnnxEmbedder(Embedder):
         self._load()
         import numpy as np
 
-        # Enable fixed-length padding + truncation inside the tokenizer
-        # so `encode_batch` returns arrays we can stack. The `tokenizers`
-        # lib handles padding server-side (no numpy padding dance).
-        self._tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
-        self._tokenizer.enable_truncation(max_length=self._max_seq_len)
-
+        # Padding + truncation are configured once inside `_load()` with
+        # the correct pad_id/pad_token for this model — calling
+        # `encode_batch` here just uses those settings. Re-configuring
+        # per-call would race if someone shares a tokenizer across
+        # threads with different truncation wants.
         encodings = self._tokenizer.encode_batch(texts)
         input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
         attention_mask = np.array(
@@ -545,8 +656,12 @@ def create_embedder(config: LensConfig) -> Embedder:
 
     Priority:
     1. Cloud inference (if enabled) — no local model needed
-    2. ONNX Runtime (if onnx_provider set or optimum available) — GPU-accelerated
-    3. sentence-transformers (fallback) — always works
+    2. ONNX Runtime (if `onnxruntime` + `huggingface_hub` + `tokenizers`
+       are installed — i.e. user installed `[full]`) — fast, ~200 MB
+       footprint, GPU-accelerated when a provider is available
+    3. sentence-transformers / PyTorch (fallback) — always works once
+       `sentence-transformers` is installed; slower on CPU but no
+       per-model download dance
     """
     if config.cloud_inference:
         if not config.qdrant_cloud_url:
