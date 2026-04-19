@@ -4,17 +4,18 @@
 # package in editable mode + their dev deps.
 #
 # Published packages:
-#   packages/mcp   → getbased-mcp (PyPI)
-#   packages/rag   → getbased-rag (PyPI)
-#   packages/stack → getbased-agent-stack (PyPI; meta that pins the two)
+#   packages/mcp        → getbased-mcp (PyPI)
+#   packages/rag        → getbased-rag (PyPI)
+#   packages/dashboard  → getbased-dashboard (PyPI; web UI for mcp + rag)
+#   packages/stack      → getbased-agent-stack (PyPI; meta that pins the others)
 
 [tool.uv.workspace]
-members = ["packages/mcp", "packages/rag", "packages/stack"]
+members = ["packages/mcp", "packages/rag", "packages/dashboard", "packages/stack"]
 
-# Cross-package dep resolution: in the workspace, "getbased-mcp" and
-# "getbased-rag" point at the sibling packages, not the PyPI releases.
-# Lets `pytest` in packages/stack use the local copies of mcp + rag
-# instead of rebuilding them from remote git.
+# Cross-package dep resolution: in the workspace, sibling package names
+# resolve to the local path instead of PyPI. Lets pytest and editable
+# installs pick up in-flight changes without republishing.
 [tool.uv.sources]
 getbased-mcp = { workspace = true }
 getbased-rag = { workspace = true }
+getbased-dashboard = { workspace = true }
