@@ -36,10 +36,23 @@ def serve(
     if lens_url:
         cfg.lens_url = lens_url
 
-    typer.echo(f"getbased-dashboard → http://{cfg.host}:{cfg.port}")
+    key = cfg.read_api_key()
+    base_url = f"http://{cfg.host}:{cfg.port}"
+    typer.echo(f"getbased-dashboard → {base_url}")
     typer.echo(f"  rag:         {cfg.lens_url}")
     typer.echo(f"  api key:     {cfg.api_key_file}")
-    if not cfg.read_api_key():
+    if key:
+        # Magic login URL — frontend auto-captures ?key=... on first
+        # load and stores it in localStorage, so users don't need to
+        # grab the key from the terminal and paste it. Matches the
+        # Jupyter Lab / Open WebUI / code-server convention. The key
+        # is the same bearer the user would paste anyway; having it
+        # in the URL once, on the loopback interface, is a net UX win
+        # over requiring a terminal hop.
+        typer.echo("")
+        typer.echo("  Open the dashboard with one click:")
+        typer.echo(f"  {base_url}/?key={key}")
+    else:
         typer.echo("  ⚠ no key found — start getbased-rag to generate one")
 
     if reload:

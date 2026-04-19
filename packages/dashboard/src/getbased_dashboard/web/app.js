@@ -21,6 +21,30 @@ function saveKey(k) {
   else localStorage.removeItem(KEY_STORAGE);
 }
 
+// Auto-capture `?key=...` from the URL on first load. The CLI prints
+// a one-click login URL with the bearer embedded so users don't have
+// to copy-paste it from the terminal. After capture we drop the
+// query string from the URL (history.replaceState) so a reload doesn't
+// re-expose the key and the browser doesn't stash it in history with
+// the secret visible. Jupyter / Open WebUI / code-server use the
+// same pattern.
+function _captureKeyFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    const k = url.searchParams.get("key");
+    if (!k) return false;
+    saveKey(k);
+    url.searchParams.delete("key");
+    // Keep hash + path, drop the ?key=...
+    const clean = url.pathname + (url.searchParams.toString() ? "?" + url.searchParams.toString() : "") + url.hash;
+    window.history.replaceState(null, "", clean);
+    return true;
+  } catch {
+    return false;
+  }
+}
+_captureKeyFromUrl();
+
 export async function authed(path, opts = {}) {
   const key = storedKey();
   const headers = Object.assign({}, opts.headers, {
