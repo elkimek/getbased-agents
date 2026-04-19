@@ -77,8 +77,10 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     # the dashboard doesn't pay the import cost of, say, httpx+multipart
     # when a test builds a bare app to probe auth-only endpoints.
     from .api import knowledge as knowledge_api
+    from .api import mcp as mcp_api
 
     knowledge_api.register(app)
+    mcp_api.register(app)
 
     # Static UI — mount last so it doesn't shadow /api/*.
     if _WEB_DIR.exists():
