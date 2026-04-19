@@ -25,14 +25,28 @@ TOKEN = os.environ.get("GETBASED_TOKEN", "")
 GATEWAY = os.environ.get("GETBASED_GATEWAY", "https://sync.getbased.health")
 
 LENS_URL = os.environ.get("LENS_URL", f"http://localhost:{os.environ.get('LENS_PORT', '8322')}")
-# Default to getbased-rag's XDG data dir (its canonical key location). The
-# legacy ~/.hermes/rag/lens_api_key path is still honored when set explicitly
-# via LENS_API_KEY_FILE — Hermes users running their own rag engine override
-# this per their config.
-_DEFAULT_KEY_PATH = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
-LENS_API_KEY_FILE = os.environ.get(
-    "LENS_API_KEY_FILE",
-    os.path.join(_DEFAULT_KEY_PATH, "getbased", "lens", "api_key"),
+
+
+def _resolve_default_key_file() -> str:
+    """Default Lens API key path. Prefer the XDG location used by getbased-rag;
+    fall back to the legacy ~/.hermes/rag/lens_api_key so upgrades from the
+    standalone getbased-mcp ≤ 0.1.0 don't silently break on boxes that still
+    have the old key there (e.g. Hermes VMs)."""
+    xdg = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+    new_default = os.path.join(xdg, "getbased", "lens", "api_key")
+    legacy = os.path.expanduser("~/.hermes/rag/lens_api_key")
+    if not os.path.exists(new_default) and os.path.exists(legacy):
+        return legacy
+    return new_default
+
+
+LENS_API_KEY_FILE = os.environ.get("LENS_API_KEY_FILE", _resolve_default_key_file())
+
+# Friendly message surfaced when a tool hits a route the lens server doesn't
+# expose (old lens, pre-libraries). See _lens_call's 404 handling.
+_UNSUPPORTED_LENS_HINT = (
+    "this lens server doesn't expose library management. "
+    "Upgrade to getbased-rag ≥ 0.1.0, or point LENS_URL at a library-capable lens."
 )
 
 
@@ -130,6 +144,17 @@ async def _lens_call(method: str, path: str, json_body: dict | None = None) -> d
     except httpx.ConnectError:
         return {"error": f"Lens server not reachable at {LENS_URL}. Is it running?"}
     except httpx.HTTPStatusError as e:
+        # Distinguish "this route doesn't exist on the server" (old lens, no
+        # /libraries or /stats endpoint) from a genuine 404 like "library id
+        # not found". FastAPI's default 404 body is `{"detail": "Not Found"}`;
+        # the new lens returns a structured error for real misses.
+        if e.response.status_code == 404:
+            try:
+                body = e.response.json()
+                if body.get("detail") == "Not Found":
+                    return {"error": "unsupported_endpoint"}
+            except (json.JSONDecodeError, ValueError):
+                pass
         return {"error": f"Lens returned {e.response.status_code}: {e.response.text}"}
     except httpx.RequestError as e:
         return {"error": f"Lens request failed: {e}"}
@@ -303,6 +328,8 @@ async def knowledge_list_libraries() -> str:
     papers, clinical guides, personal notes, etc.) before searching or
     switching between them."""
     data = await _lens_call("GET", "/libraries")
+    if data.get("error") == "unsupported_endpoint":
+        return f"Knowledge libraries: {_UNSUPPORTED_LENS_HINT}"
     if "error" in data:
         return f"Knowledge libraries error: {data['error']}"
     libs = data.get("libraries") or []
@@ -331,6 +358,8 @@ async def knowledge_activate_library(library_id: str) -> str:
     if not library_id:
         return "Error: library_id is required. Call knowledge_list_libraries to find one."
     data = await _lens_call("POST", f"/libraries/{library_id}/activate")
+    if data.get("error") == "unsupported_endpoint":
+        return f"Activate library: {_UNSUPPORTED_LENS_HINT}"
     if "error" in data:
         return f"Activate library error: {data['error']}"
     libs = data.get("libraries") or []
@@ -348,6 +377,8 @@ async def knowledge_stats() -> str:
     contributes. Useful when diagnosing "I can't find X" — either the source
     isn't indexed, or the relevant passages didn't score high enough."""
     data = await _lens_call("GET", "/stats")
+    if data.get("error") == "unsupported_endpoint":
+        return f"Knowledge stats: {_UNSUPPORTED_LENS_HINT}"
     if "error" in data:
         return f"Knowledge stats error: {data['error']}"
     total = data.get("total_chunks", 0)

@@ -177,9 +177,9 @@ Ask about your labs in any connected conversation:
 |---|---|---|
 | `GETBASED_TOKEN` | Yes | Read-only token from getbased Settings > Data > Messenger Access |
 | `GETBASED_GATEWAY` | No | Context gateway URL (default: `https://sync.getbased.health`) |
-| `LENS_URL` | No | RAG server URL (default: `http://localhost:8321`). Overrides `LENS_PORT` |
-| `LENS_PORT` | No | RAG server port, only used to build default `LENS_URL` (default: `8321`) |
-| `LENS_API_KEY_FILE` | No | Path to RAG API key file (default: `~/.hermes/rag/lens_api_key`) |
+| `LENS_URL` | No | RAG server URL (default: `http://localhost:8322`). Overrides `LENS_PORT` |
+| `LENS_PORT` | No | RAG server port, only used to build default `LENS_URL` (default: `8322`) |
+| `LENS_API_KEY_FILE` | No | Path to RAG API key file. Default: `$XDG_DATA_HOME/getbased/lens/api_key` (getbased-rag's canonical location). If that file doesn't exist but the legacy `~/.hermes/rag/lens_api_key` does, the legacy path is used instead — upgrades from standalone `getbased-mcp` ≤ 0.1.0 keep working without config changes. |
 
 ## Custom Knowledge Source (getbased app)
 
@@ -199,12 +199,16 @@ Every chat question and focus card will now be enriched with RAG-retrieved passa
 The RAG server isn't running. Start it and verify with:
 
 ```bash
-curl http://localhost:8321/health
+curl http://localhost:8322/health
 ```
 
 ### `knowledge_search` returns "Lens API key not found"
 
-The RAG server generates its API key on first start and writes it to `~/.hermes/rag/lens_api_key`. If the key file is missing, restart the RAG server — it will create a new one.
+getbased-rag generates its API key on first start and writes it to `$XDG_DATA_HOME/getbased/lens/api_key` (e.g. `~/.local/share/getbased/lens/api_key` on Linux). If you're upgrading from the standalone `getbased-mcp` ≤ 0.1.0 and your key is at `~/.hermes/rag/lens_api_key`, that legacy path is still auto-detected — no config change needed. If the file is missing entirely, restart the RAG server and it will create a new one.
+
+### `knowledge_list_libraries` / `knowledge_stats` return "this lens server doesn't expose library management"
+
+The lens server you're pointed at is older than `getbased-rag` 0.1.0 and doesn't implement the `/libraries` or `/stats` endpoints. `knowledge_search` still works against older lens servers since `/query` is protocol-stable. To get library management, either upgrade the lens, or set `LENS_URL` to a library-capable endpoint.
 
 ### Blood work tools work but knowledge_search doesn't
 

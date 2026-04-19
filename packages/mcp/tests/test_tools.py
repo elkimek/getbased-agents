@@ -278,3 +278,89 @@ async def test_getbased_lens_config_no_key(gm, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(gm, "LENS_API_KEY_FILE", "/nonexistent/path")
     out = await gm.getbased_lens_config()
     assert "Lens API key not found" in out
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Friendly handling when pointed at a pre-library lens server.
+# FastAPI's default 404 body (`{"detail": "Not Found"}`) means the route
+# doesn't exist — treat as "this lens doesn't support libraries" rather
+# than bubbling a raw 404 up to the LLM.
+# ═══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_knowledge_list_libraries_unsupported_endpoint(gm) -> None:
+    respx.get(f"{LENS_URL_PREFIX}/libraries").mock(
+        return_value=Response(404, json={"detail": "Not Found"})
+    )
+    out = await gm.knowledge_list_libraries()
+    assert "doesn't expose library management" in out
+    assert "Upgrade to getbased-rag" in out
+    # Not the raw 404 — user should see the hint, not the status code
+    assert "404" not in out
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_knowledge_activate_library_unsupported_endpoint(gm) -> None:
+    respx.post(f"{LENS_URL_PREFIX}/libraries/anything/activate").mock(
+        return_value=Response(404, json={"detail": "Not Found"})
+    )
+    out = await gm.knowledge_activate_library(library_id="anything")
+    assert "doesn't expose library management" in out
+    assert "404" not in out
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_knowledge_stats_unsupported_endpoint(gm) -> None:
+    respx.get(f"{LENS_URL_PREFIX}/stats").mock(
+        return_value=Response(404, json={"detail": "Not Found"})
+    )
+    out = await gm.knowledge_stats()
+    assert "doesn't expose library management" in out
+    assert "404" not in out
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Default API key path resolution — new XDG location wins when present;
+# legacy ~/.hermes/rag/lens_api_key kicks in for upgrades from
+# standalone getbased-mcp ≤ 0.1.0 where the key is still at the old path.
+# ═══════════════════════════════════════════════════════════════════════
+
+def test_resolve_default_key_file_new_location(gm, tmp_path, monkeypatch) -> None:
+    xdg = tmp_path / "xdg"
+    (xdg / "getbased" / "lens").mkdir(parents=True)
+    (xdg / "getbased" / "lens" / "api_key").write_text("new")
+    # Point HOME somewhere without a legacy file so only the new path exists.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+    monkeypatch.setenv("HOME", str(home))
+    resolved = gm._resolve_default_key_file()
+    assert resolved == str(xdg / "getbased" / "lens" / "api_key")
+
+
+def test_resolve_default_key_file_legacy_fallback(gm, tmp_path, monkeypatch) -> None:
+    # New default does NOT exist; legacy ~/.hermes/rag/lens_api_key DOES.
+    xdg = tmp_path / "xdg"
+    xdg.mkdir()
+    home = tmp_path / "home"
+    (home / ".hermes" / "rag").mkdir(parents=True)
+    (home / ".hermes" / "rag" / "lens_api_key").write_text("legacy")
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+    monkeypatch.setenv("HOME", str(home))
+    resolved = gm._resolve_default_key_file()
+    assert resolved == str(home / ".hermes" / "rag" / "lens_api_key")
+
+
+def test_resolve_default_key_file_no_legacy_no_new(gm, tmp_path, monkeypatch) -> None:
+    # Neither path exists → return the new default (fresh install).
+    xdg = tmp_path / "xdg"
+    xdg.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+    monkeypatch.setenv("HOME", str(home))
+    resolved = gm._resolve_default_key_file()
+    assert resolved == str(xdg / "getbased" / "lens" / "api_key")
