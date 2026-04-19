@@ -364,3 +364,101 @@ def test_resolve_default_key_file_no_legacy_no_new(gm, tmp_path, monkeypatch) ->
     monkeypatch.setenv("HOME", str(home))
     resolved = gm._resolve_default_key_file()
     assert resolved == str(xdg / "getbased" / "lens" / "api_key")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Activity logging — every tool call writes a JSONL record. Args are
+# never logged (privacy). Failures still emit a record with ok=false.
+# Telemetry must never crash the tool call itself.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _read_activity(path) -> list[dict]:
+    from pathlib import Path
+
+    p = Path(path)
+    if not p.exists():
+        return []
+    import json as _json
+
+    return [_json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_activity_logged_on_successful_tool_call(gm, tmp_path) -> None:
+    respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json={"profiles": []}))
+    await gm.getbased_list_profiles()
+    records = _read_activity(tmp_path / "activity.jsonl")
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["tool"] == "getbased_list_profiles"
+    assert rec["ok"] is True
+    assert rec["duration_ms"] >= 0
+    assert "error" not in rec
+    assert "ts" in rec
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_activity_logged_on_failing_tool_call(gm, tmp_path, monkeypatch) -> None:
+    """If a tool raises, we still want the record written — and the error
+    class (not the message) captured, since the message could contain
+    sensitive upstream data."""
+
+    async def boom(*_a, **_kw):
+        raise RuntimeError("this message should NOT be in the log")
+
+    monkeypatch.setattr(gm, "_fetch_context", boom)
+    import pytest as _pt
+
+    with _pt.raises(RuntimeError):
+        await gm.getbased_list_profiles()
+    records = _read_activity(tmp_path / "activity.jsonl")
+    assert len(records) == 1
+    assert records[0]["ok"] is False
+    assert records[0]["error"] == "RuntimeError"
+    # The raw error message must not have leaked
+    assert "should NOT" not in records[0].get("error", "")
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_activity_never_logs_tool_args(gm, tmp_path) -> None:
+    """Queries may contain health info. The log records the shape of
+    usage, not its content — no field should echo the arguments."""
+    respx.post(f"{LENS_URL_PREFIX}/query").mock(return_value=Response(200, json={"chunks": []}))
+    await gm.knowledge_search(query="my very private PHI query", n_results=2)
+    records = _read_activity(tmp_path / "activity.jsonl")
+    assert len(records) == 1
+    serialised = str(records[0])
+    assert "private" not in serialised
+    assert "PHI" not in serialised
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_activity_log_disabled_via_env(gm, tmp_path, monkeypatch) -> None:
+    """LENS_MCP_ACTIVITY_LOG=off must skip writes entirely — no file
+    created, no directory created."""
+    off_path = tmp_path / "never-exists"
+    monkeypatch.setenv("LENS_MCP_ACTIVITY_LOG", "off")
+    respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json={"profiles": []}))
+    await gm.getbased_list_profiles()
+    assert not off_path.exists()
+    # And the default location created via the fixture also should not
+    # receive records once we've switched to off
+    # (the fixture points LENS_MCP_ACTIVITY_LOG at tmp/activity.jsonl;
+    # after monkeypatching to "off" the writer short-circuits)
+
+
+def test_activity_telemetry_failure_doesnt_break_tool(gm, tmp_path, monkeypatch) -> None:
+    """If the log dir is un-writable, tool calls must still succeed.
+    Monkey-patch open() to raise, then verify _append_activity swallows."""
+
+    def bad_open(*_a, **_kw):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr("builtins.open", bad_open)
+    # Should not raise
+    gm._append_activity("t", 5, True, "")

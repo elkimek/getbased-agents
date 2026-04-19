@@ -11,12 +11,17 @@ Knowledge base queries go through the Lens RAG server (separate process).
 No models are loaded in this process — everything is HTTP.
 """
 
+import functools
 import json
+import logging
 import os
 import re
+import time
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+log = logging.getLogger("getbased_mcp")
 
 mcp = FastMCP("getbased")
 
@@ -48,6 +53,84 @@ _UNSUPPORTED_LENS_HINT = (
     "this lens server doesn't expose library management. "
     "Upgrade to getbased-rag ≥ 0.1.0, or point LENS_URL at a library-capable lens."
 )
+
+
+# ── Activity logging ────────────────────────────────────────────────
+# Every tool call writes one JSONL record: tool name, wall-clock ts,
+# duration in ms, success flag, and error-class on failure. **Args are
+# never logged** — queries can contain sensitive health info, so we
+# record the shape of usage, not its content. The dashboard tails this
+# file for the Activity tab; with no dashboard installed the file is
+# just a rotating-by-hand log the user can inspect.
+#
+# Default path is $XDG_STATE_HOME/getbased/mcp/activity.jsonl
+# (~/.local/state/getbased/mcp/activity.jsonl on Linux). Override with
+# LENS_MCP_ACTIVITY_LOG. Set LENS_MCP_ACTIVITY_LOG=off to disable.
+
+def _activity_log_path() -> str:
+    """Resolve where activity records get appended. Env override wins;
+    otherwise XDG_STATE_HOME. Returns "" when logging is disabled."""
+    override = os.environ.get("LENS_MCP_ACTIVITY_LOG")
+    if override is not None:
+        return "" if override.lower() in ("off", "false", "0", "") else override
+    state = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+    return os.path.join(state, "getbased", "mcp", "activity.jsonl")
+
+
+def _append_activity(tool: str, duration_ms: int, ok: bool, error: str) -> None:
+    """Best-effort JSONL append. Any I/O failure is swallowed — telemetry
+    must never break a tool call. Directory is created on first write."""
+    path = _activity_log_path()
+    if not path:
+        return
+    record = {
+        "ts": time.time(),
+        "tool": tool,
+        "duration_ms": duration_ms,
+        "ok": ok,
+    }
+    if error:
+        record["error"] = error
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError as e:
+        # Don't spam stderr in stdio MCP (it'd confuse the MCP client).
+        # Debug-level is fine; the user can inspect via Python logging.
+        log.debug("activity log append failed: %s", e)
+
+
+def _instrumented(label: str):
+    """Wrap an async tool implementation with success/failure + duration
+    logging. Applied below each `@mcp.tool()` so the registered callable
+    is the instrumented one. Preserves the function's signature and
+    docstring via functools.wraps — FastMCP's tool registration reads
+    those to build the tool schema."""
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            t0 = time.monotonic()
+            error_name = ""
+            ok = True
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as e:
+                ok = False
+                error_name = type(e).__name__
+                raise
+            finally:
+                _append_activity(
+                    label,
+                    int((time.monotonic() - t0) * 1000),
+                    ok,
+                    error_name,
+                )
+
+        return wrapper
+
+    return deco
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -167,6 +250,7 @@ async def _lens_call(method: str, path: str, json_body: dict | None = None) -> d
 # ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
+@_instrumented("getbased_lab_context")
 async def getbased_lab_context(profile: str = "") -> str:
     """Get a full summary of the user's blood work data, health context,
     supplements, and goals from getbased. Use when the user asks broad
@@ -185,6 +269,7 @@ async def getbased_lab_context(profile: str = "") -> str:
 
 
 @mcp.tool()
+@_instrumented("getbased_section")
 async def getbased_section(section: str = "", profile: str = "") -> str:
     """Get a specific section of health data, or list all available sections.
     Call with no section name to get the index (section names + line counts).
@@ -228,6 +313,7 @@ async def getbased_section(section: str = "", profile: str = "") -> str:
 
 
 @mcp.tool()
+@_instrumented("getbased_list_profiles")
 async def getbased_list_profiles() -> str:
     """List all available profiles in getbased."""
     data = await _fetch_context()
@@ -246,6 +332,7 @@ async def getbased_list_profiles() -> str:
 # ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
+@_instrumented("knowledge_search")
 async def knowledge_search(
     query: str,
     n_results: int = 5,
@@ -300,6 +387,7 @@ async def knowledge_search(
 
 
 @mcp.tool()
+@_instrumented("getbased_lens_config")
 async def getbased_lens_config() -> str:
     """Get the Lens RAG endpoint configuration for getbased's Knowledge Base.
     Returns the URL, API key, and recommended top_k to paste into
@@ -322,6 +410,7 @@ async def getbased_lens_config() -> str:
 
 
 @mcp.tool()
+@_instrumented("knowledge_list_libraries")
 async def knowledge_list_libraries() -> str:
     """List all knowledge base libraries on the Lens server, showing which is
     active. Use this to discover what collections the user has (research
@@ -346,6 +435,7 @@ async def knowledge_list_libraries() -> str:
 
 
 @mcp.tool()
+@_instrumented("knowledge_activate_library")
 async def knowledge_activate_library(library_id: str) -> str:
     """Switch the Lens server's active library. All subsequent
     `knowledge_search` and `knowledge_stats` calls will target this library
@@ -371,6 +461,7 @@ async def knowledge_activate_library(library_id: str) -> str:
 
 
 @mcp.tool()
+@_instrumented("knowledge_stats")
 async def knowledge_stats() -> str:
     """Get per-source chunk counts for the active knowledge base library.
     Tells you which documents are indexed and how many excerpts each

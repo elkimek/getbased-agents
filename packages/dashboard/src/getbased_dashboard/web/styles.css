@@ -339,3 +339,59 @@ button.ghost:hover { color: var(--text); border-color: var(--text-dim); }
   border-radius: 5px;
   font-size: 12px;
 }
+
+/* ── Activity tab ─────────────────────────────────────────────── */
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.stat-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+.stat-v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat-l { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+
+.tool-stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tool-stats th {
+  text-align: left;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.tool-stats td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.tool-stats tr:last-child td { border-bottom: 0; }
+
+.activity-feed { list-style: none; margin: 0; padding: 0; max-height: 400px; overflow-y: auto; }
+.feed-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 70px 80px;
+  gap: 10px;
+  font-size: 12px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+.feed-row:last-child { border-bottom: 0; }
+.feed-row.err .feed-s { color: var(--danger); }
+.feed-t { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.feed-tool code { font-size: 11px; }
+.feed-d { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.feed-s { color: var(--ok); font-weight: 500; }

@@ -48,6 +48,7 @@ function hideGate() {
 const TAB_MODULES = {
   knowledge: () => import("./tabs/knowledge.js"),
   mcp: () => import("./tabs/mcp.js"),
+  activity: () => import("./tabs/activity.js"),
 };
 
 async function activateTab(name) {

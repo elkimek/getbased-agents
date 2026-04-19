@@ -16,13 +16,15 @@ import pytest
 def tmp_key_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isolated Lens API key file — the module reads this at import time via
     env var defaults, so we have to monkeypatch + reload to get a clean
-    pickup per test."""
+    pickup per test. Also redirects the activity log into tmp_path so
+    tests don't pollute ~/.local/state/getbased/."""
     key_file = tmp_path / "api_key"
     key_file.write_text("test-lens-key")
     monkeypatch.setenv("LENS_API_KEY_FILE", str(key_file))
     monkeypatch.setenv("LENS_URL", "http://lens.test:8322")
     monkeypatch.setenv("GETBASED_TOKEN", "test-gateway-token")
     monkeypatch.setenv("GETBASED_GATEWAY", "https://gateway.test")
+    monkeypatch.setenv("LENS_MCP_ACTIVITY_LOG", str(tmp_path / "activity.jsonl"))
     return key_file
 
 
