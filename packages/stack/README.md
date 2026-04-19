@@ -7,7 +7,18 @@ Part of the [getbased-agents monorepo](https://github.com/elkimek/getbased-agent
 ## Install
 
 ```bash
-pipx install "getbased-agent-stack[full]"
+pipx install --include-deps "getbased-agent-stack[full]"
+```
+
+The `--include-deps` flag is required — it exposes `getbased-mcp`, `lens`, and `getbased-dashboard` alongside `getbased-stack` on your PATH. Without it, pipx only links the stack's own entry point and the MCP/rag/dashboard binaries stay hidden inside the venv.
+
+`uv` users: install each package as its own tool instead, since `uv tool` has no `--include-deps` equivalent yet:
+
+```bash
+uv tool install getbased-mcp
+uv tool install "getbased-rag[full]"
+uv tool install getbased-dashboard
+uv tool install "getbased-agent-stack[full]"
 ```
 
 Pulls:
