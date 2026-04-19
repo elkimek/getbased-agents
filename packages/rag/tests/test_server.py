@@ -400,6 +400,47 @@ def test_ingest_rejects_empty_upload(client: TestClient, auth: dict) -> None:
     assert r.status_code in (400, 422)
 
 
+def test_ingest_expands_zip_inside_uploaded_dir(
+    client: TestClient, auth: dict, tmp_path
+) -> None:
+    """When a .zip is part of a multipart upload, rag must auto-extract
+    it so the contained markdown/text files get indexed. The single-
+    file CLI path already handles zips via _expand_zip_if_needed;
+    the HTTP path dropped them silently until _walk learned to expand
+    zips inside a directory.
+
+    Regression for a bug where uploading a .zip via the dashboard
+    produced start total:0 + result chunks:0 — zip was saved but never
+    walked."""
+    import io
+    import zipfile
+
+    # Build an in-memory zip with two markdown files.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "doc-a.md", "# Alpha\n\n" + "content " * 100
+        )
+        zf.writestr("doc-b.md", "# Beta\n\n" + "more stuff " * 100)
+    buf.seek(0)
+
+    r = client.post(
+        "/ingest",
+        headers=auth,
+        files=[("files", ("bundle.zip", buf.read(), "application/zip"))],
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["files_seen"] >= 2, body
+    assert body["chunks_indexed"] >= 2
+    # Stats should list both extracted files as sources
+    stats = client.get("/stats", headers=auth).json()
+    sources = {d["source"] for d in stats["documents"]}
+    # Extracted names land under `_zip_bundle/doc-{a,b}.md`
+    assert any("doc-a.md" in s for s in sources), sources
+    assert any("doc-b.md" in s for s in sources), sources
+
+
 def test_ingest_ndjson_stream_emits_start_file_and_result_events(
     client: TestClient, auth: dict
 ) -> None:

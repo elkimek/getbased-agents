@@ -85,10 +85,77 @@ def _read_text(path: Path) -> str:
     raise RuntimeError(f"Unsupported file type: {suffix}")
 
 
+def _expand_zips_in_dir(root: Path) -> None:
+    """Find every .zip inside `root`, extract it to a sibling directory
+    (`_zip_<stem>`), and delete the original. Idempotent — already-
+    extracted zips are skipped by re-checking existence. Called before
+    _walk so uploads that contain a mix of zips + loose files behave
+    the same as `lens ingest file.zip` from the CLI.
+
+    Why this exists: the HTTP /ingest endpoint saves all uploads into
+    one temp dir and passes that dir to ingest_path. Without expansion,
+    `.zip` files fail the SUPPORTED_EXTS filter in _walk() and their
+    contents never reach the parser. The single-file CLI path hits
+    _expand_zip_if_needed directly, but the multi-file HTTP path does
+    not — so we normalise here.
+    """
+    if not root.is_dir():
+        return
+    zips = list(root.rglob("*.zip"))
+    for zip_path in zips:
+        if not zip_path.is_file():
+            continue
+        # Skip if we already extracted it this run (some corner cases
+        # where a zip sits inside another zip).
+        target_dir = zip_path.parent / f"_zip_{zip_path.stem}"
+        if target_dir.exists():
+            continue
+        root_abs = root.resolve()
+        try:
+            target_dir.mkdir(parents=True, exist_ok=False)
+            target_abs = target_dir.resolve()
+            with zipfile.ZipFile(zip_path) as zf:
+                for member in zf.namelist():
+                    dest = (target_abs / member).resolve()
+                    # zip-slip guard — entries must land inside the
+                    # per-zip target, not leak out via "../".
+                    try:
+                        dest.relative_to(target_abs)
+                    except ValueError:
+                        raise RuntimeError(f"Unsafe zip entry: {member}")
+                    # And must stay inside the overall ingest root too
+                    # (defence in depth; redundant given the per-zip
+                    # check but cheap).
+                    try:
+                        dest.relative_to(root_abs)
+                    except ValueError:
+                        raise RuntimeError(f"Zip entry escapes root: {member}")
+                zf.extractall(target_abs)
+            log.info(
+                "Expanded %s → %s (%d entries)",
+                zip_path.name,
+                target_dir.name,
+                len(zipfile.ZipFile(zip_path).namelist()),
+            )
+            zip_path.unlink()
+        except (zipfile.BadZipFile, RuntimeError, OSError) as e:
+            log.warning("Failed to expand %s: %s — leaving zip in place", zip_path, e)
+            # Don't crash the whole ingest — just move on and the zip
+            # will be silently skipped by _walk's extension filter.
+            # Clean up partial extraction.
+            if target_dir.exists():
+                import shutil as _shutil
+
+                _shutil.rmtree(target_dir, ignore_errors=True)
+
+
 def _walk(root: Path) -> Iterator[Path]:
     if root.is_file():
         yield root
         return
+    # Auto-extract any zips the caller dropped in (matches CLI single-
+    # file behaviour for ingest_path(some.zip)).
+    _expand_zips_in_dir(root)
     for p in root.rglob("*"):
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
             yield p
