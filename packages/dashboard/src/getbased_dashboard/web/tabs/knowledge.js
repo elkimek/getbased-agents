@@ -8,6 +8,7 @@
  */
 
 import { authed } from "../app.js";
+import { showConfirm, showPrompt, showAlert } from "../modals.js";
 
 let _libraries = { activeId: "", libraries: [] };
 let _stats = { total_chunks: 0, documents: [] };
@@ -254,6 +255,23 @@ function _modelLabel(modelId) {
   return modelId && modelId.includes("/") ? modelId.split("/").pop() : modelId || "";
 }
 
+function _relTime(ms) {
+  // Small "X ago" helper matching the terseness of the PWA. `0` = never.
+  if (!ms || ms <= 0) return "never";
+  const diff = Math.max(0, Date.now() - ms);
+  const sec = Math.floor(diff / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
+
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -334,10 +352,17 @@ function renderLibraries(root) {
       const modelChip = lib.embedding_model
         ? `<span class="model-chip" title="${esc(lib.embedding_model)}">${esc(_modelLabel(lib.embedding_model))}</span>`
         : "";
+      const chunksLabel = lib.chunks != null
+        ? `${lib.chunks.toLocaleString()} chunk${lib.chunks === 1 ? "" : "s"}`
+        : "—";
       return `
         <li class="lib-row ${isActive ? "is-active" : ""}">
           <div class="lib-name">${esc(lib.name || "unnamed")}${modelChip}</div>
-          <div class="lib-id">${esc(lib.id)}</div>
+          <div class="lib-meta">
+            <span class="lib-chunks">${esc(chunksLabel)}</span>
+            <span class="lib-meta-sep">·</span>
+            <span class="lib-lastingest" title="${lib.lastIngestAt ? new Date(lib.lastIngestAt).toLocaleString() : "never indexed"}">indexed ${_relTime(lib.lastIngestAt)}</span>
+          </div>
           <div class="lib-actions">
             ${activateOrBadge}
             <button data-act="rename" data-id="${esc(lib.id)}">rename</button>
@@ -444,10 +469,8 @@ function wireHandlers(root) {
       });
       await render(root);
     } catch (err) {
-      alert(`Failed: ${err.message}`);
+      await showAlert(`Failed: ${err.message}`, { tone: "error" });
     } finally {
-      // Button is replaced by render() on success — this just handles the
-      // error path where the same DOM stays.
       if (createBtn.isConnected) createBtn.disabled = false;
     }
   });
@@ -457,27 +480,43 @@ function wireHandlers(root) {
       const act = btn.dataset.act;
       const id = btn.dataset.id;
       const source = btn.dataset.source;
+      // Resolve the current display name for the action's target so
+      // prompt/confirm copy can reference it by name instead of id hash.
+      const lib = (_libraries.libraries || []).find((l) => l.id === id);
+      const libName = lib ? lib.name : id;
       try {
         if (act === "activate") {
           await j(`/api/knowledge/libraries/${encodeURIComponent(id)}/activate`, { method: "POST" });
         } else if (act === "rename") {
-          const name = prompt("New name:");
+          const name = await showPrompt(`Rename "${libName}" to:`, {
+            defaultValue: libName,
+            okLabel: "Rename",
+            placeholder: "Library name",
+          });
           if (!name) return;
           await j(`/api/knowledge/libraries/${encodeURIComponent(id)}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: name.trim() }),
+            body: JSON.stringify({ name }),
           });
         } else if (act === "delete") {
-          if (!confirm("Delete this library? All indexed documents in it will be removed.")) return;
+          const ok = await showConfirm(
+            `Delete "${libName}"? All indexed documents in it will be permanently removed.`,
+            { okLabel: "Delete", danger: true }
+          );
+          if (!ok) return;
           await j(`/api/knowledge/libraries/${encodeURIComponent(id)}`, { method: "DELETE" });
         } else if (act === "del-source") {
-          if (!confirm(`Drop all chunks for "${source}"?`)) return;
+          const ok = await showConfirm(`Drop all chunks for "${source}"?`, {
+            okLabel: "Drop",
+            danger: true,
+          });
+          if (!ok) return;
           await j(`/api/knowledge/sources/${encodeURIComponent(source)}`, { method: "DELETE" });
         }
         render(root);
       } catch (err) {
-        alert(`Failed: ${err.message}`);
+        await showAlert(`Failed: ${err.message}`, { tone: "error" });
       }
     });
   });

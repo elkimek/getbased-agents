@@ -8,6 +8,7 @@
  */
 
 import { authed } from "../app.js";
+import { showAlert } from "../modals.js";
 
 function _errMessage(body, status, statusText) {
   const raw = (body && (body.error ?? body.detail)) ?? `HTTP ${status}`;
@@ -172,7 +173,7 @@ function wireHandlers(root) {
       btn.textContent = "copied ✓";
       setTimeout(() => (btn.textContent = prev), 1200);
     } catch {
-      alert("Copy failed — select the text manually");
+      await showAlert("Copy failed — select the text manually.", { tone: "error" });
     }
   });
 }

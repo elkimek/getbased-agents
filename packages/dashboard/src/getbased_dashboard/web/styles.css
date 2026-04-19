@@ -180,7 +180,7 @@ code {
 .lib-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
-  gap: 12px;
+  gap: 12px 16px;
   align-items: center;
   padding: 10px 0;
   border-top: 1px solid var(--border);
@@ -188,7 +188,16 @@ code {
 .lib-row:first-child { border-top: 0; }
 .lib-row.is-active .lib-name { color: var(--accent); font-weight: 600; }
 .lib-name { font-size: 14px; }
-.lib-id { color: var(--text-dim); font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+.lib-meta {
+  color: var(--text-dim);
+  font-size: 12px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+.lib-meta-sep { color: var(--border); }
+.lib-chunks { font-variant-numeric: tabular-nums; }
 .lib-actions { display: flex; gap: 6px; }
 .lib-actions button,
 .src-row button {
@@ -349,6 +358,100 @@ code {
 }
 .pill-cancel:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
 .pill-cancel:disabled { opacity: 0.6; cursor: wait; }
+
+/* ── Modal dialogs (confirm / prompt / alert) ─────────────────── */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 10000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.confirm-overlay.show { display: flex; }
+.confirm-dialog {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px 28px;
+  max-width: 440px;
+  width: 92%;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.confirm-message {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+  margin: 0 0 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.confirm-btn {
+  padding: 7px 18px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+.confirm-btn-cancel {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+.confirm-btn-cancel:hover {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.confirm-btn-primary {
+  background: var(--accent);
+  color: #0b0d10;
+}
+.confirm-btn-primary:hover { filter: brightness(1.1); }
+.confirm-btn-danger {
+  background: var(--danger);
+  color: white;
+}
+.confirm-btn-danger:hover { filter: brightness(1.1); }
+
+.prompt-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+.prompt-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Nudge animation on accidental backdrop-click — tells the user the
+ * dialog won't auto-dismiss without a button press, matching the PWA. */
+@keyframes modal-nudge {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.02); }
+  60% { transform: scale(0.99); }
+  100% { transform: scale(1); }
+}
+.confirm-dialog.modal-nudge {
+  animation: modal-nudge 0.22s ease-out;
+}
 
 .engine-strip {
   display: flex;

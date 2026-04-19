@@ -117,6 +117,9 @@ class Registry:
                     # to the server's configured default so the UI can
                     # render a model chip for every row.
                     "embedding_model": l.get("embedding_model") or default_model,
+                    # 0 = never indexed. UI renders "never" vs a relative
+                    # time ("2h ago") accordingly.
+                    "lastIngestAt": int(l.get("lastIngestAt", 0)),
                 }
                 for l in state["libraries"]
             ],
@@ -142,6 +145,9 @@ class Registry:
             # dimension-locked so you can't swap an existing library's
             # model without re-ingesting from scratch.
             "embedding_model": model,
+            # lastIngestAt is 0 until the first successful ingest. UI
+            # uses this to render "Last indexed 2h ago" per library.
+            "lastIngestAt": 0,
         }
         state["libraries"].append(lib)
         if not state["activeId"]:
@@ -158,6 +164,19 @@ class Registry:
             if l.get("id") == library_id:
                 return l.get("embedding_model") or self._config.embedding_model
         raise ValueError(f"No such library: {library_id}")
+
+    def touch_ingest(self, library_id: str) -> None:
+        """Record that an ingest just finished for this library. The UI
+        reads `lastIngestAt` to show "Last indexed: N min ago" per row."""
+        state = self._load()
+        changed = False
+        for l in state["libraries"]:
+            if l.get("id") == library_id:
+                l["lastIngestAt"] = int(time.time() * 1000)
+                changed = True
+                break
+        if changed:
+            self._save(state)
 
     def activate(self, library_id: str) -> str:
         state = self._load()

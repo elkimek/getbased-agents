@@ -597,6 +597,11 @@ def create_app(config: LensConfig) -> FastAPI:
         store_obj = active_store()
         embedder_obj = active_embedder()
         backend_obj = _get_backend()
+        # Capture the active library id up front so we can stamp
+        # `lastIngestAt` on it after a successful ingest — registry
+        # activity could change mid-run in theory, but we want the
+        # id that was active when the ingest started.
+        ingest_library_id = registry.active_id()
 
         if want_stream:
             import asyncio as _asyncio
@@ -630,6 +635,15 @@ def create_app(config: LensConfig) -> FastAPI:
                         _sync_on_event,
                         cancel_event.is_set,
                     )
+                    # Stamp lastIngestAt on the library if we actually
+                    # wrote something — avoids marking a zero-result
+                    # (or cancelled-before-first-batch) run as "last
+                    # indexed now".
+                    if ingest_library_id and result.get("chunks_indexed", 0) > 0:
+                        try:
+                            registry.touch_ingest(ingest_library_id)
+                        except Exception as e:  # noqa: BLE001
+                            log.debug("touch_ingest failed: %s", e)
                     queue.put_nowait({"event": "result", **result})
                 except FileNotFoundError as e:
                     queue.put_nowait({"event": "error", "message": str(e)})
@@ -691,6 +705,11 @@ def create_app(config: LensConfig) -> FastAPI:
                 embedder=embedder_obj,
                 backend=backend_obj,
             )
+            if ingest_library_id and result.get("chunks_indexed", 0) > 0:
+                try:
+                    registry.touch_ingest(ingest_library_id)
+                except Exception as e:  # noqa: BLE001
+                    log.debug("touch_ingest failed: %s", e)
         except FileNotFoundError as e:
             raise HTTPException(400, str(e))
         except Exception:
@@ -707,7 +726,23 @@ def create_app(config: LensConfig) -> FastAPI:
     async def libraries_list(authorization: Optional[str] = Header(default=None)):
         require_auth(authorization)
         registry.ensure_default()
-        return registry.list()
+        state = registry.list()
+        # Augment each row with its live chunk count. UI renders this
+        # as a chip next to the library name so users can see at a glance
+        # which library has data without activating it. Failures per-
+        # library are swallowed — missing collections report 0.
+        backend = _get_backend()
+        for lib in state["libraries"]:
+            try:
+                store = Store(
+                    config,
+                    collection=registry.collection_for(lib["id"]),
+                    backend=backend,
+                )
+                lib["chunks"] = int(store.count())
+            except Exception:
+                lib["chunks"] = 0
+        return state
 
     @app.post("/libraries")
     async def libraries_create(

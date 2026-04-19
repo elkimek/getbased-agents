@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-dashboard"
-version = "0.4.0"
+version = "0.5.0"
 description = "Web dashboard for getbased-agents — manage knowledge libraries, generate MCP client configs, inspect agent activity"
 readme = "README.md"
 license = "GPL-3.0-only"

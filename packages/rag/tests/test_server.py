@@ -239,6 +239,53 @@ def test_rename_nonexistent_library_returns_404(client: TestClient, auth: dict) 
     assert r.status_code == 404
 
 
+def test_libraries_list_includes_chunks_and_last_ingest(
+    client: TestClient, auth: dict, config
+) -> None:
+    """Dashboard's library list shows a chunk count chip + relative
+    "last indexed" per row. Backend must surface both fields in GET
+    /libraries so the UI doesn't have to make N+1 extra round-trips."""
+    r1 = client.post("/libraries", json={"name": "Alpha"}, headers=auth)
+    assert r1.status_code == 200
+    alpha = r1.json()["library"]
+    assert alpha["lastIngestAt"] == 0  # never indexed
+
+    state = client.get("/libraries", headers=auth).json()
+    found = next(l for l in state["libraries"] if l["id"] == alpha["id"])
+    # Both new fields present and sensible for an empty library
+    assert found["chunks"] == 0
+    assert found["lastIngestAt"] == 0
+
+
+def test_ingest_stamps_last_ingest_at(client: TestClient, auth: dict) -> None:
+    """A successful ingest must update the active library's
+    lastIngestAt timestamp. UI uses this to render "indexed 2m ago"
+    instead of "never"."""
+    import time as _t
+
+    # Create and activate a fresh library so this test is independent
+    r = client.post("/libraries", json={"name": "IngestTarget"}, headers=auth)
+    lib_id = r.json()["library"]["id"]
+    client.post(f"/libraries/{lib_id}/activate", headers=auth)
+
+    before_list = client.get("/libraries", headers=auth).json()
+    before = next(l for l in before_list["libraries"] if l["id"] == lib_id)
+    assert before["lastIngestAt"] == 0
+
+    t0 = int(_t.time() * 1000) - 1
+    ingest_r = client.post(
+        "/ingest",
+        headers=auth,
+        files=[("files", ("doc.md", b"# hi\n" + b"x " * 200, "text/markdown"))],
+    )
+    assert ingest_r.status_code == 200
+
+    after_list = client.get("/libraries", headers=auth).json()
+    after = next(l for l in after_list["libraries"] if l["id"] == lib_id)
+    assert after["lastIngestAt"] >= t0
+    assert after["chunks"] > 0
+
+
 def test_duplicate_library_name_rejected(client: TestClient, auth: dict) -> None:
     """Rapid double-submit from a browser (UI guards help but can't
     bulletproof across DOM re-renders) should not produce duplicate

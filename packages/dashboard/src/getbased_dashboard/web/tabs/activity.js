@@ -6,6 +6,7 @@
  */
 
 import { authed } from "../app.js";
+import { showConfirm, showAlert } from "../modals.js";
 
 let _refreshTimer = null;
 
@@ -120,12 +121,16 @@ async function load(root) {
     `;
 
     root.querySelector("#clear-log").addEventListener("click", async () => {
-      if (!confirm("Clear the activity log?")) return;
+      const ok = await showConfirm(
+        "Clear the activity log? The file on disk will be deleted.",
+        { okLabel: "Clear", danger: true }
+      );
+      if (!ok) return;
       try {
         await j("/api/activity", { method: "DELETE" });
         load(root);
       } catch (err) {
-        alert(err.message);
+        await showAlert(err.message, { tone: "error" });
       }
     });
   } catch (err) {
