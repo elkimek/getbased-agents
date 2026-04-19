@@ -28,50 +28,48 @@ async function refresh() {
   ]);
 }
 
-function html(strings, ...values) {
-  const parts = [];
-  strings.forEach((s, i) => {
-    parts.push(s);
-    if (i < values.length) {
-      const v = values[i];
-      parts.push(
-        v == null
-          ? ""
-          : String(v).replace(/[&<>"']/g, (c) => ({
-              "&": "&amp;",
-              "<": "&lt;",
-              ">": "&gt;",
-              '"': "&quot;",
-              "'": "&#39;",
-            }[c]))
-      );
-    }
-  });
-  return parts.join("");
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
 }
 
 function renderLibraries(root) {
   const libs = _libraries.libraries || [];
   const active = _libraries.activeId;
   const rows = libs
-    .map(
-      (lib) => html`
-        <li class="lib-row ${lib.id === active ? "is-active" : ""}">
-          <div class="lib-name">${lib.name || "unnamed"}</div>
-          <div class="lib-id">${lib.id}</div>
+    .map((lib) => {
+      const isActive = lib.id === active;
+      const activateOrBadge = isActive
+        ? '<span class="badge ok">active</span>'
+        : `<button data-act="activate" data-id="${esc(lib.id)}">activate</button>`;
+      return `
+        <li class="lib-row ${isActive ? "is-active" : ""}">
+          <div class="lib-name">${esc(lib.name || "unnamed")}</div>
+          <div class="lib-id">${esc(lib.id)}</div>
           <div class="lib-actions">
-            ${lib.id === active
-              ? '<span class="badge ok">active</span>'
-              : `<button data-act="activate" data-id="${lib.id}">activate</button>`}
-            <button data-act="rename" data-id="${lib.id}">rename</button>
-            <button class="danger" data-act="delete" data-id="${lib.id}">delete</button>
+            ${activateOrBadge}
+            <button data-act="rename" data-id="${esc(lib.id)}">rename</button>
+            <button class="danger" data-act="delete" data-id="${esc(lib.id)}">delete</button>
           </div>
+        </li>
+      `;
+    })
+    .join("");
+
+  const sourceRows = (_stats.documents || [])
+    .map(
+      (d) => `
+        <li class="src-row">
+          <div class="src-chunks">${d.chunks}</div>
+          <div class="src-name">${esc(d.source)}</div>
+          <button class="danger small" data-act="del-source" data-source="${esc(d.source)}">delete</button>
         </li>
       `
     )
     .join("");
 
-  root.innerHTML = html`
+  root.innerHTML = `
     <section class="panel">
       <div class="panel-head">
         <h2>Libraries</h2>
@@ -107,19 +105,7 @@ function renderLibraries(root) {
     <section class="panel">
       <div class="panel-head"><h2>Sources (active library)</h2></div>
       <div class="stat-total">Total chunks: ${_stats.total_chunks}</div>
-      <ul class="src-list">
-        ${(_stats.documents || [])
-          .map(
-            (d) => html`
-              <li class="src-row">
-                <div class="src-chunks">${d.chunks}</div>
-                <div class="src-name">${d.source}</div>
-                <button class="danger small" data-act="del-source" data-source="${d.source}">delete</button>
-              </li>
-            `
-          )
-          .join("") || '<li class="empty">No sources indexed yet.</li>'}
-      </ul>
+      <ul class="src-list">${sourceRows || '<li class="empty">No sources indexed yet.</li>'}</ul>
     </section>
   `;
 
@@ -192,21 +178,24 @@ function wireHandlers(root) {
         return;
       }
       results.innerHTML = chunks
-        .map(
-          (c, i) => html`
+        .map((c, i) => {
+          const scoreBadge = c.score != null
+            ? `<span class="result-score">${c.score.toFixed(3)}</span>`
+            : "";
+          return `
             <div class="result">
               <div class="result-head">
                 <span class="result-num">[${i + 1}]</span>
-                <span class="result-src">${c.source || "unknown"}</span>
-                ${c.score != null ? `<span class="result-score">${c.score.toFixed(3)}</span>` : ""}
+                <span class="result-src">${esc(c.source || "unknown")}</span>
+                ${scoreBadge}
               </div>
-              <div class="result-text">${c.text || ""}</div>
+              <div class="result-text">${esc(c.text || "")}</div>
             </div>
-          `
-        )
+          `;
+        })
         .join("");
     } catch (err) {
-      results.innerHTML = `<p class="err">${err.message}</p>`;
+      results.innerHTML = `<p class="err">${esc(err.message)}</p>`;
     }
   });
 
