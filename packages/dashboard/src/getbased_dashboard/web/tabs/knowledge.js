@@ -12,6 +12,7 @@ import { authed } from "../app.js";
 let _libraries = { activeId: "", libraries: [] };
 let _stats = { total_chunks: 0, documents: [] };
 let _info = null;
+let _models = { default: "", models: [] };
 
 // Ingest status survives across re-renders so the "Indexed N chunks"
 // confirmation doesn't flash and disappear. Cleared when the tab is
@@ -42,17 +43,29 @@ async function j(path, opts = {}) {
 }
 
 async function refresh() {
-  // `/info` is best-effort — a slightly older rag that pre-dates the
-  // endpoint just returns 404 and we render the panel without the
-  // engine badge. Don't let a missing endpoint break the whole tab.
-  const [libs, stats, info] = await Promise.all([
+  // `/info` + `/models` are best-effort — a slightly older rag that
+  // pre-dates these endpoints just returns 404 and we render the panel
+  // without the engine badge / model picker. Don't let a missing
+  // endpoint break the whole tab.
+  const [libs, stats, info, models] = await Promise.all([
     j("/api/knowledge/libraries"),
     j("/api/knowledge/stats"),
     j("/api/knowledge/info").catch(() => null),
+    j("/api/knowledge/models").catch(() => ({ default: "", models: [] })),
   ]);
   _libraries = libs;
   _stats = stats;
   _info = info;
+  _models = models;
+}
+
+function _modelLabel(modelId) {
+  // Look up the human label from the /models list; fall back to the
+  // id's basename if unknown. Keeps the chip tight ("BGE-M3") instead
+  // of leaking the fully-qualified HF path into every library row.
+  const entry = (_models.models || []).find((m) => m.id === modelId);
+  if (entry && entry.label) return entry.label;
+  return modelId && modelId.includes("/") ? modelId.split("/").pop() : modelId || "";
 }
 
 function esc(s) {
@@ -132,9 +145,12 @@ function renderLibraries(root) {
       const activateOrBadge = isActive
         ? '<span class="badge ok">active</span>'
         : `<button data-act="activate" data-id="${esc(lib.id)}">activate</button>`;
+      const modelChip = lib.embedding_model
+        ? `<span class="model-chip" title="${esc(lib.embedding_model)}">${esc(_modelLabel(lib.embedding_model))}</span>`
+        : "";
       return `
         <li class="lib-row ${isActive ? "is-active" : ""}">
-          <div class="lib-name">${esc(lib.name || "unnamed")}</div>
+          <div class="lib-name">${esc(lib.name || "unnamed")}${modelChip}</div>
           <div class="lib-id">${esc(lib.id)}</div>
           <div class="lib-actions">
             ${activateOrBadge}
@@ -145,6 +161,20 @@ function renderLibraries(root) {
       `;
     })
     .join("");
+
+  // Model picker for the create-library form. Only render options from
+  // the curated /models list; server default is pre-selected.
+  const modelOptions = (_models.models || [])
+    .map((m) => {
+      const selected = m.id === _models.default ? " selected" : "";
+      const dim = m.dim ? ` · ${m.dim}d` : "";
+      const sz = m.size_mb ? ` · ${m.size_mb >= 1024 ? (m.size_mb / 1024).toFixed(1) + "GB" : m.size_mb + "MB"}` : "";
+      return `<option value="${esc(m.id)}"${selected}>${esc(m.label || m.id)}${dim}${sz}</option>`;
+    })
+    .join("");
+  const modelPicker = modelOptions
+    ? `<label class="model-picker">model <select name="embedding_model">${modelOptions}</select></label>`
+    : "";
 
   const sourceRows = (_stats.documents || [])
     .map(
@@ -165,9 +195,11 @@ function renderLibraries(root) {
         <h2>Libraries</h2>
         <form id="create-lib" class="inline-form">
           <input name="name" placeholder="New library name" required />
+          ${modelPicker}
           <button type="submit">Create</button>
         </form>
       </div>
+      <p class="panel-sub" style="margin: -4px 0 12px">Each library is pinned to its model at creation — vectors are dim-locked and can't be switched later.</p>
       <ul class="lib-list">${rows || '<li class="empty">No libraries yet — create one above.</li>'}</ul>
     </section>
 
@@ -219,14 +251,18 @@ function wireHandlers(root) {
   createForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (createBtn.disabled) return;
-    const name = new FormData(e.target).get("name").toString().trim();
+    const fd = new FormData(e.target);
+    const name = fd.get("name").toString().trim();
+    const embedding_model = (fd.get("embedding_model") || "").toString().trim();
     if (!name) return;
     createBtn.disabled = true;
     try {
+      const body = { name };
+      if (embedding_model) body.embedding_model = embedding_model;
       await j("/api/knowledge/libraries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(body),
       });
       await render(root);
     } catch (err) {

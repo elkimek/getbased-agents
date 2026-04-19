@@ -282,6 +282,55 @@ def test_ingest_rejects_oversize_before_reaching_rag(
 
 
 @respx.mock
+def test_models_proxied_through(client: TestClient) -> None:
+    """UI's model picker reads /api/knowledge/models. Dashboard forwards
+    rag's curated list verbatim."""
+    respx.get(f"{RAG_BASE}/models").mock(
+        return_value=Response(
+            200,
+            json={
+                "default": "sentence-transformers/all-MiniLM-L6-v2",
+                "models": [
+                    {"id": "sentence-transformers/all-MiniLM-L6-v2", "label": "MiniLM-L6-v2", "dim": 384},
+                    {"id": "BAAI/bge-m3", "label": "BGE-M3", "dim": 1024},
+                ],
+            },
+        )
+    )
+    r = client.get("/api/knowledge/models", headers=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["default"].endswith("all-MiniLM-L6-v2")
+    assert len(body["models"]) == 2
+
+
+@respx.mock
+def test_library_create_forwards_embedding_model(client: TestClient) -> None:
+    """When the browser's Create form submits an `embedding_model`, the
+    dashboard passes it verbatim to rag so the new library is pinned
+    to that model."""
+    route = respx.post(f"{RAG_BASE}/libraries").mock(
+        return_value=Response(
+            200,
+            json={
+                "library": {"id": "new", "name": "BGE-test", "embedding_model": "BAAI/bge-m3"},
+                "state": {"activeId": "new", "libraries": []},
+            },
+        )
+    )
+    r = client.post(
+        "/api/knowledge/libraries",
+        headers=AUTH,
+        json={"name": "BGE-test", "embedding_model": "BAAI/bge-m3"},
+    )
+    assert r.status_code == 200
+    import json as _json
+
+    body = _json.loads(route.calls[0].request.content)
+    assert body == {"name": "BGE-test", "embedding_model": "BAAI/bge-m3"}
+
+
+@respx.mock
 def test_info_proxied_through(client: TestClient) -> None:
     """GET /api/knowledge/info forwards rag's /info response verbatim
     so the Knowledge tab can show the engine badge."""

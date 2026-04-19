@@ -103,6 +103,7 @@ class Registry:
     # ── Public surface ────────────────────────────────────────────────
     def list(self) -> dict:
         state = self._load()
+        default_model = self._config.embedding_model
         # Redact nothing — the registry is hash-ids + user-chosen names.
         return {
             "activeId": state["activeId"],
@@ -111,12 +112,17 @@ class Registry:
                     "id": l.get("id", ""),
                     "name": l.get("name", ""),
                     "createdAt": int(l.get("createdAt", 0)),
+                    # Libraries created before per-library models were
+                    # introduced have no `embedding_model` key — fall back
+                    # to the server's configured default so the UI can
+                    # render a model chip for every row.
+                    "embedding_model": l.get("embedding_model") or default_model,
                 }
                 for l in state["libraries"]
             ],
         }
 
-    def create(self, name: str) -> dict:
+    def create(self, name: str, embedding_model: str | None = None) -> dict:
         name = (name or "").strip() or "Untitled"
         state = self._load()
         # Reject duplicate names outright — prevents rapid double-submit
@@ -127,12 +133,31 @@ class Registry:
         for existing in state["libraries"]:
             if existing.get("name", "").strip().lower() == name.lower():
                 raise ValueError(f"A library named {name!r} already exists")
-        lib = {"id": _new_id(), "name": name, "createdAt": int(time.time() * 1000)}
+        model = (embedding_model or "").strip() or self._config.embedding_model
+        lib = {
+            "id": _new_id(),
+            "name": name,
+            "createdAt": int(time.time() * 1000),
+            # Model is pinned at creation time — Qdrant collections are
+            # dimension-locked so you can't swap an existing library's
+            # model without re-ingesting from scratch.
+            "embedding_model": model,
+        }
         state["libraries"].append(lib)
         if not state["activeId"]:
             state["activeId"] = lib["id"]
         self._save(state)
         return lib
+
+    def model_for(self, library_id: str) -> str:
+        """Return the embedding model a library uses. Legacy libraries
+        without a stored model inherit the server's configured default
+        — matches what `list()` exposes."""
+        state = self._load()
+        for l in state["libraries"]:
+            if l.get("id") == library_id:
+                return l.get("embedding_model") or self._config.embedding_model
+        raise ValueError(f"No such library: {library_id}")
 
     def activate(self, library_id: str) -> str:
         state = self._load()
@@ -160,6 +185,8 @@ class Registry:
             "id": found["id"],
             "name": found["name"],
             "createdAt": int(found.get("createdAt", 0)),
+            "embedding_model": found.get("embedding_model")
+            or self._config.embedding_model,
         }
 
     def delete(self, library_id: str) -> None:

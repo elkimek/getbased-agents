@@ -133,6 +133,13 @@ def register(app: FastAPI) -> None:
         """Proxy rag's /info for the Knowledge tab's engine badge."""
         return await _proxy_json(request, "GET", "/info")
 
+    @router.get("/models")
+    async def models(request: Request):
+        """Proxy rag's curated embedding-model list for the create-library
+        picker. Lets the dashboard render the dropdown without hard-coding
+        model ids + dims — if rag adds new ones, they appear automatically."""
+        return await _proxy_json(request, "GET", "/models")
+
     @router.delete("/sources")
     async def clear_sources(request: Request):
         return await _proxy_json(request, "DELETE", "/sources")

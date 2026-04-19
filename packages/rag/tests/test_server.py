@@ -487,6 +487,147 @@ def test_info_requires_auth(client: TestClient) -> None:
     assert client.get("/info").status_code == 401
 
 
+def test_models_lists_curated_plus_default(client: TestClient, auth: dict) -> None:
+    """UI renders a dropdown from /models — it must include the server's
+    current default and expose dim for each option (dim is what locks
+    collections, so users should see why models aren't interchangeable
+    post-creation)."""
+    r = client.get("/models", headers=auth)
+    assert r.status_code == 200
+    body = r.json()
+    assert "default" in body
+    assert "models" in body
+    assert len(body["models"]) >= 5
+    # Every curated entry has an id, label, dim, plus optional notes
+    for m in body["models"]:
+        assert m["id"]
+        assert isinstance(m["dim"], int)
+        assert m["dim"] > 0
+        assert "label" in m
+    # At least one entry matches the server's configured default
+    assert any(m["id"] == body["default"] for m in body["models"]) or body[
+        "default"
+    ] in [m["id"] for m in body["models"]]
+
+
+def test_models_requires_auth(client: TestClient) -> None:
+    assert client.get("/models").status_code == 401
+
+
+def test_library_create_with_model_pins_it(client: TestClient, auth: dict) -> None:
+    """Creating a library with an explicit embedding_model stores that
+    value. Subsequent `list()` shows the pinned model; the server's
+    active_embedder() resolves to a per-model instance."""
+    r = client.post(
+        "/libraries",
+        json={"name": "BGE test", "embedding_model": "BAAI/bge-small-en-v1.5"},
+        headers=auth,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["library"]["embedding_model"] == "BAAI/bge-small-en-v1.5"
+    # Show in list with the pinned model
+    state = client.get("/libraries", headers=auth).json()
+    found = [l for l in state["libraries"] if l["name"] == "BGE test"]
+    assert len(found) == 1
+    assert found[0]["embedding_model"] == "BAAI/bge-small-en-v1.5"
+
+
+def test_library_create_without_model_uses_server_default(
+    client: TestClient, auth: dict, config
+) -> None:
+    """Omitting the field falls back to LENS_EMBEDDING_MODEL at create
+    time. UI always has something to show in the model chip."""
+    r = client.post("/libraries", json={"name": "Default-model"}, headers=auth)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["library"]["embedding_model"] == config.embedding_model
+
+
+def test_legacy_library_without_stored_model_inherits_default(tmp_path) -> None:
+    """Libraries created before per-model support lack the embedding_model
+    field in libraries.json. On read, they inherit the server's current
+    default. Matches the browser-local lens's legacy-library handling."""
+    from lens.registry import Registry
+    from lens.config import LensConfig
+    from pathlib import Path
+    import json as _json
+
+    cfg = LensConfig(data_dir=tmp_path, embedding_model="all-MiniLM-L6-v2")
+    libs_file = Path(tmp_path) / "libraries.json"
+    libs_file.write_text(
+        _json.dumps(
+            {
+                "activeId": "legacy1",
+                "libraries": [
+                    {"id": "legacy1", "name": "Old Library", "createdAt": 1}
+                ],
+            }
+        )
+    )
+    reg = Registry(cfg)
+    state = reg.list()
+    assert state["libraries"][0]["embedding_model"] == "all-MiniLM-L6-v2"
+    # model_for() also resolves to default for legacy libraries
+    assert reg.model_for("legacy1") == "all-MiniLM-L6-v2"
+
+
+def test_library_create_rejects_overlong_model(client: TestClient, auth: dict) -> None:
+    r = client.post(
+        "/libraries",
+        json={"name": "X", "embedding_model": "a" * 500},
+        headers=auth,
+    )
+    assert r.status_code == 422
+
+
+def test_two_libraries_same_model_share_embedder_instance(
+    client: TestClient, auth: dict, patched_embedder, monkeypatch, config
+) -> None:
+    """Two libraries on the same model should reuse one embedder —
+    matters for BGE-M3 (2 GB resident) where duplicating would OOM
+    many boxes. Assert by tracking how many times create_embedder gets
+    called for a given model."""
+    calls: list[str] = []
+
+    from lens import embedder as emb_mod
+    from lens import server as server_mod
+
+    original = server_mod.create_embedder
+
+    def counting(cfg):
+        calls.append(cfg.embedding_model)
+        return original(cfg)
+
+    monkeypatch.setattr(server_mod, "create_embedder", counting)
+
+    # Two libraries pinned to same model
+    r1 = client.post(
+        "/libraries",
+        json={"name": "Lib-A", "embedding_model": "all-MiniLM-L6-v2"},
+        headers=auth,
+    )
+    r2 = client.post(
+        "/libraries",
+        json={"name": "Lib-B", "embedding_model": "all-MiniLM-L6-v2"},
+        headers=auth,
+    )
+    assert r1.status_code == 200 and r2.status_code == 200
+
+    # Activate A, make a query → embedder for MiniLM loads once
+    client.post(
+        f"/libraries/{r1.json()['library']['id']}/activate", headers=auth
+    )
+    client.post("/query", json={"query": "hi", "top_k": 1}, headers=auth)
+    # Activate B, query again → should reuse the same embedder
+    client.post(
+        f"/libraries/{r2.json()['library']['id']}/activate", headers=auth
+    )
+    client.post("/query", json={"query": "hi", "top_k": 1}, headers=auth)
+
+    assert calls.count("all-MiniLM-L6-v2") == 1, calls
+
+
 def test_ingest_json_single_shot_still_works_without_accept_header(
     client: TestClient, auth: dict
 ) -> None:

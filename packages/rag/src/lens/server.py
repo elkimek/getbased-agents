@@ -62,6 +62,12 @@ class QueryResponse(BaseModel):
 
 class LibraryCreateRequest(BaseModel):
     name: str = Field(default="Untitled", max_length=120)
+    # Optional embedding model — defaults to the server's configured
+    # LENS_EMBEDDING_MODEL when omitted. Model is pinned for the library's
+    # lifetime because Qdrant collections are dimension-locked. 200 char
+    # cap accommodates fully-qualified HF ids like
+    # `sentence-transformers/all-MiniLM-L6-v2`.
+    embedding_model: Optional[str] = Field(default=None, max_length=200)
 
 
 class LibraryRenameRequest(BaseModel):
@@ -72,7 +78,10 @@ def create_app(config: LensConfig) -> FastAPI:
     """Build the FastAPI app with config-driven dependencies."""
     config.ensure_dirs()
     api_key = get_or_create_api_key(config.api_key_file)
-    embedder_holder: dict = {"obj": None}
+    # embedder_holder is a pool: {model_name: Embedder}. Each library
+    # pins to one model at creation time; the pool caches one embedder
+    # per distinct model so libraries sharing a model share memory.
+    embedder_holder: dict = {}
     backend_holder: dict = {"obj": None}
     registry = Registry(config)
 
@@ -189,11 +198,38 @@ def create_app(config: LensConfig) -> FastAPI:
             backend_holder["obj"] = QdrantBackend(config)
         return backend_holder["obj"]
 
-    def get_embedder():
-        if embedder_holder["obj"] is None:
-            log.info("Lazy-loading embedder…")
-            embedder_holder["obj"] = create_embedder(config)
-        return embedder_holder["obj"]
+    # Per-model embedder pool. Each library is pinned to one embedding
+    # model at creation time; the pool lazy-loads a dedicated embedder
+    # the first time that model is needed and keeps it for reuse. Keying
+    # by model name means two libraries on the same model share one
+    # ~400 MB–2 GB model instance instead of duplicating it in memory.
+    def get_embedder(model_name: str | None = None):
+        key = (model_name or "").strip() or config.embedding_model
+        cached = embedder_holder.get(key)
+        if cached is not None:
+            return cached
+        log.info("Lazy-loading embedder for model %s…", key)
+        # Build a per-model config — create_embedder reads `embedding_model`
+        # from the config object and routes to the right backend. Avoids
+        # polluting the shared config.
+        from dataclasses import replace as _replace
+
+        cfg_for_model = _replace(config, embedding_model=key)
+        emb = create_embedder(cfg_for_model)
+        embedder_holder[key] = emb
+        return emb
+
+    def get_embedder_for_library(library_id: str):
+        """Resolve a library id to its pinned embedder. Used by ingest
+        and query endpoints so each library's Qdrant collection only
+        ever sees vectors from the model it was created with."""
+        try:
+            model = registry.model_for(library_id)
+        except ValueError:
+            # Unknown library → fall back to server default; calling
+            # endpoint will surface the real error if needed.
+            model = config.embedding_model
+        return get_embedder(model)
 
     def active_store() -> Store:
         """Return a Store bound to the currently active library's collection.
@@ -204,6 +240,11 @@ def create_app(config: LensConfig) -> FastAPI:
         registry.ensure_default()
         collection = registry.active_collection()
         return Store(config, collection=collection, backend=_get_backend())
+
+    def active_embedder():
+        """Embedder for the currently active library."""
+        registry.ensure_default()
+        return get_embedder_for_library(registry.active_id())
 
     def require_auth(authorization: Optional[str]) -> None:
         if not authorization:
@@ -268,6 +309,75 @@ def create_app(config: LensConfig) -> FastAPI:
             log.exception("Clear failed")
             raise HTTPException(500, "Clear failed — see server logs")
 
+    @app.get("/models")
+    async def models_endpoint(authorization: Optional[str] = Header(default=None)):
+        """Curated list of embedding models the server can serve, plus
+        the active default. Lets the dashboard render a model picker
+        without hard-coding the same list in frontend code. Each entry
+        surfaces dimension + a short human label; dim is what makes
+        collections incompatible across models, so exposing it is how
+        users understand the "you can't switch mid-flight" rule."""
+        require_auth(authorization)
+        from .embedder import _MODEL_DIMS
+
+        curated = [
+            {
+                "id": "sentence-transformers/all-MiniLM-L6-v2",
+                "label": "MiniLM-L6-v2",
+                "dim": 384,
+                "size_mb": 90,
+                "notes": "Fast, small, English-first. Default.",
+            },
+            {
+                "id": "BAAI/bge-small-en-v1.5",
+                "label": "BGE-small (en)",
+                "dim": 384,
+                "size_mb": 130,
+                "notes": "BGE baseline. Strong English retrieval.",
+            },
+            {
+                "id": "BAAI/bge-base-en-v1.5",
+                "label": "BGE-base (en)",
+                "dim": 768,
+                "size_mb": 440,
+                "notes": "Higher recall than small, slower.",
+            },
+            {
+                "id": "BAAI/bge-large-en-v1.5",
+                "label": "BGE-large (en)",
+                "dim": 1024,
+                "size_mb": 1340,
+                "notes": "Best English retrieval, heavy.",
+            },
+            {
+                "id": "BAAI/bge-m3",
+                "label": "BGE-M3 (multilingual)",
+                "dim": 1024,
+                "size_mb": 2270,
+                "notes": "Multilingual, long-context, top recall.",
+            },
+        ]
+        # Surface any models discovered from _MODEL_DIMS that we didn't
+        # include in the curated list — keeps the list forward-compatible
+        # without a code change if the embedder module adds new defaults.
+        seen = {m["id"] for m in curated}
+        for model_id, dim in _MODEL_DIMS.items():
+            if model_id in seen:
+                continue
+            curated.append(
+                {
+                    "id": model_id,
+                    "label": model_id.split("/")[-1],
+                    "dim": dim,
+                    "size_mb": None,
+                    "notes": "",
+                }
+            )
+        return {
+            "default": config.embedding_model,
+            "models": curated,
+        }
+
     @app.get("/info")
     async def info_endpoint(authorization: Optional[str] = Header(default=None)):
         """Backend introspection: embedding engine, model, dimension,
@@ -276,10 +386,10 @@ def create_app(config: LensConfig) -> FastAPI:
         is mildly interesting to an attacker (narrows down what's
         locally exploitable)."""
         require_auth(authorization)
-        # Embedder — may be lazy-loaded. Ask for its info without
-        # forcing a load; `loaded: false` is a useful UI signal on
-        # first request.
-        embedder = get_embedder()
+        # Embedder for the active library — each library is pinned to
+        # one model. Info asks without forcing a load; `loaded: false`
+        # is a useful UI signal on first request.
+        embedder = active_embedder()
         try:
             emb_info = embedder.info()
         except Exception:
@@ -354,7 +464,11 @@ def create_app(config: LensConfig) -> FastAPI:
             raise HTTPException(400, "Empty query")
 
         top_k = max(1, min(config.max_chunks, int(req.top_k)))
-        embedder = get_embedder()
+        # Query vector must be encoded with the SAME model the library's
+        # collection was indexed with — otherwise the vectors don't
+        # compare. `active_embedder` resolves via the active library's
+        # pinned model.
+        embedder = active_embedder()
         store = active_store()
 
         # Encode query
@@ -479,8 +593,9 @@ def create_app(config: LensConfig) -> FastAPI:
 
         # Reuse the server's live store + embedder + backend so we don't
         # race the server's QdrantBackend for the local Qdrant file lock.
+        # Embedder is resolved from the active library's pinned model.
         store_obj = active_store()
-        embedder_obj = get_embedder()
+        embedder_obj = active_embedder()
         backend_obj = _get_backend()
 
         if want_stream:
@@ -574,7 +689,7 @@ def create_app(config: LensConfig) -> FastAPI:
     ):
         require_auth(authorization)
         try:
-            lib = registry.create(req.name)
+            lib = registry.create(req.name, embedding_model=req.embedding_model)
         except ValueError as e:
             # Registry raises ValueError for duplicate names — surface
             # as 409 Conflict so callers can distinguish "already exists"
