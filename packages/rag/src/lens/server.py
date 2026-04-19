@@ -268,6 +268,63 @@ def create_app(config: LensConfig) -> FastAPI:
             log.exception("Clear failed")
             raise HTTPException(500, "Clear failed — see server logs")
 
+    @app.get("/info")
+    async def info_endpoint(authorization: Optional[str] = Header(default=None)):
+        """Backend introspection: embedding engine, model, dimension,
+        reranker state, active library + chunk count. Intended for UI
+        "what's running" badges. Bearer-authed because the engine config
+        is mildly interesting to an attacker (narrows down what's
+        locally exploitable)."""
+        require_auth(authorization)
+        # Embedder — may be lazy-loaded. Ask for its info without
+        # forcing a load; `loaded: false` is a useful UI signal on
+        # first request.
+        embedder = get_embedder()
+        try:
+            emb_info = embedder.info()
+        except Exception:
+            emb_info = {
+                "engine": type(embedder).__name__,
+                "model": config.embedding_model,
+                "dimension": None,
+                "loaded": False,
+            }
+
+        # Active library — avoid touching the embedder / store if not
+        # already alive. We query via the registry + backend directly.
+        active_library: dict = {}
+        total_chunks = 0
+        try:
+            registry.ensure_default()
+            state = registry.list()
+            active_id = state.get("activeId", "")
+            for lib in state.get("libraries", []):
+                if lib.get("id") == active_id:
+                    active_library = {
+                        "id": lib.get("id"),
+                        "name": lib.get("name"),
+                    }
+                    break
+            if active_id:
+                store = Store(
+                    config,
+                    collection=registry.collection_for(active_id),
+                    backend=_get_backend(),
+                )
+                total_chunks = int(store.count())
+        except Exception as e:  # noqa: BLE001
+            log.debug("info: active-library probe failed: %s", e)
+
+        return {
+            "version": "0.3.0",
+            "embedder": emb_info,
+            "similarity_floor": config.similarity_floor,
+            "reranker": bool(config.reranker),
+            "max_chunks": config.max_chunks,
+            "active_library": active_library,
+            "active_chunks": total_chunks,
+        }
+
     @app.get("/health")
     async def health():
         # Don't force-load the embedder for health — report what we know.

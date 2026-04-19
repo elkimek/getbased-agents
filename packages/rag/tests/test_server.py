@@ -463,6 +463,30 @@ def test_ingest_ndjson_stream_reports_error_as_event(
     assert "ingest failed" in errors[0]["message"].lower() or "synthetic" in errors[0]["message"]
 
 
+def test_info_endpoint_reports_engine_and_dim(
+    client: TestClient, auth: dict
+) -> None:
+    """Dashboard's Knowledge tab shows an engine badge — it reads
+    /info for the embedder metadata. Ensure the endpoint returns the
+    fields we advertise (engine, model, dimension) plus active library
+    + chunk count."""
+    r = client.get("/info", headers=auth)
+    assert r.status_code == 200
+    body = r.json()
+    assert "embedder" in body
+    emb = body["embedder"]
+    # Fake embedder in tests reports its class name as the engine
+    assert emb["dimension"] >= 1
+    assert "active_library" in body
+    # Config echo
+    assert body["similarity_floor"] >= 0
+    assert isinstance(body["reranker"], bool)
+
+
+def test_info_requires_auth(client: TestClient) -> None:
+    assert client.get("/info").status_code == 401
+
+
 def test_ingest_json_single_shot_still_works_without_accept_header(
     client: TestClient, auth: dict
 ) -> None:

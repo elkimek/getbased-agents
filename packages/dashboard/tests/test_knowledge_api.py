@@ -282,6 +282,36 @@ def test_ingest_rejects_oversize_before_reaching_rag(
 
 
 @respx.mock
+def test_info_proxied_through(client: TestClient) -> None:
+    """GET /api/knowledge/info forwards rag's /info response verbatim
+    so the Knowledge tab can show the engine badge."""
+    respx.get(f"{RAG_BASE}/info").mock(
+        return_value=Response(
+            200,
+            json={
+                "embedder": {
+                    "engine": "onnx",
+                    "model": "BAAI/bge-m3",
+                    "provider": "CPUExecutionProvider",
+                    "dimension": 1024,
+                    "loaded": True,
+                },
+                "similarity_floor": 0.55,
+                "reranker": False,
+                "active_library": {"id": "abc", "name": "Research"},
+                "active_chunks": 42,
+            },
+        )
+    )
+    r = client.get("/api/knowledge/info", headers=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["embedder"]["engine"] == "onnx"
+    assert body["embedder"]["dimension"] == 1024
+    assert body["active_library"]["name"] == "Research"
+
+
+@respx.mock
 def test_ingest_streams_ndjson_events_when_accept_requested(
     client: TestClient,
 ) -> None:

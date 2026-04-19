@@ -128,6 +128,11 @@ def register(app: FastAPI) -> None:
     async def stats(request: Request):
         return await _proxy_json(request, "GET", "/stats")
 
+    @router.get("/info")
+    async def info(request: Request):
+        """Proxy rag's /info for the Knowledge tab's engine badge."""
+        return await _proxy_json(request, "GET", "/info")
+
     @router.delete("/sources")
     async def clear_sources(request: Request):
         return await _proxy_json(request, "DELETE", "/sources")

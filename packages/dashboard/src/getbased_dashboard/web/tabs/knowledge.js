@@ -11,6 +11,7 @@ import { authed } from "../app.js";
 
 let _libraries = { activeId: "", libraries: [] };
 let _stats = { total_chunks: 0, documents: [] };
+let _info = null;
 
 // Ingest status survives across re-renders so the "Indexed N chunks"
 // confirmation doesn't flash and disappear. Cleared when the tab is
@@ -41,16 +42,85 @@ async function j(path, opts = {}) {
 }
 
 async function refresh() {
-  [_libraries, _stats] = await Promise.all([
+  // `/info` is best-effort — a slightly older rag that pre-dates the
+  // endpoint just returns 404 and we render the panel without the
+  // engine badge. Don't let a missing endpoint break the whole tab.
+  const [libs, stats, info] = await Promise.all([
     j("/api/knowledge/libraries"),
     j("/api/knowledge/stats"),
+    j("/api/knowledge/info").catch(() => null),
   ]);
+  _libraries = libs;
+  _stats = stats;
+  _info = info;
 }
 
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
+}
+
+function renderEngineBadge() {
+  if (!_info) return "";
+  const emb = _info.embedder || {};
+  const engine = emb.engine || "unknown";
+  const model = emb.model || "";
+  const dim = emb.dimension;
+  const loaded = emb.loaded;
+
+  // Engine label — short, recognisable. Match the getbased PWA's
+  // terseness: one row, not a card.
+  let engineLabel;
+  if (engine === "onnx") {
+    const prov = (emb.provider || "").toLowerCase();
+    const provShort = prov.includes("cuda")
+      ? "CUDA"
+      : prov.includes("rocm")
+      ? "ROCm"
+      : prov.includes("coreml")
+      ? "CoreML"
+      : prov.includes("openvino")
+      ? "OpenVINO"
+      : prov.includes("cpu")
+      ? "CPU"
+      : prov || "auto";
+    engineLabel = `ONNX · ${provShort}`;
+  } else if (engine === "pytorch") {
+    const device = (emb.device || "cpu").toUpperCase();
+    engineLabel = `PyTorch · ${device}`;
+  } else if (engine === "qdrant-cloud") {
+    engineLabel = `Qdrant Cloud${emb.host ? ` · ${emb.host}` : ""}`;
+  } else {
+    engineLabel = engine;
+  }
+
+  // Trim overly-long model ids — "sentence-transformers/all-MiniLM-L6-v2"
+  // shows more usefully as "all-MiniLM-L6-v2". Keep the full value in
+  // title so hover reveals it.
+  const modelShort = model.includes("/") ? model.split("/").pop() : model;
+
+  const rerankerCell = _info.reranker
+    ? '<span class="engine-pill warn">reranker on</span>'
+    : "";
+  const floorCell =
+    _info.similarity_floor != null
+      ? `<span class="engine-cell">floor <strong>${_info.similarity_floor}</strong></span>`
+      : "";
+  const loadedCell = loaded
+    ? '<span class="engine-pill ok">ready</span>'
+    : '<span class="engine-pill dim">cold</span>';
+
+  return `
+    <div class="engine-strip" title="${esc(model)}">
+      <span class="engine-cell"><span class="engine-k">engine</span> <strong>${esc(engineLabel)}</strong></span>
+      <span class="engine-cell"><span class="engine-k">model</span> <strong>${esc(modelShort)}</strong></span>
+      <span class="engine-cell"><span class="engine-k">dim</span> <strong>${dim != null ? dim : "—"}</strong></span>
+      ${floorCell}
+      ${rerankerCell}
+      ${loadedCell}
+    </div>
+  `;
 }
 
 function renderLibraries(root) {
@@ -89,6 +159,7 @@ function renderLibraries(root) {
     .join("");
 
   root.innerHTML = `
+    ${renderEngineBadge()}
     <section class="panel">
       <div class="panel-head">
         <h2>Libraries</h2>

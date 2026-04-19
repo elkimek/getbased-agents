@@ -289,6 +289,50 @@ code {
   transition: width 0.15s ease-out;
 }
 
+.engine-strip {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+  line-height: 1.4;
+}
+.engine-cell {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.engine-cell strong {
+  color: var(--text);
+  font-weight: 500;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+.engine-k {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+.engine-pill {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-left: auto;
+}
+.engine-pill.ok { color: var(--ok); border-color: var(--ok); }
+.engine-pill.warn { color: var(--warn); border-color: var(--warn); }
+.engine-pill.dim { color: var(--text-dim); }
+
 .results { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
 .result {
   background: var(--bg);
