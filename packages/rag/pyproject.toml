@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-rag"
-version = "0.6.2"
+version = "0.7.0"
 description = "getbased-rag — standalone RAG knowledge server (formerly the Electron-bundled Lens)"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -24,27 +24,24 @@ dependencies = [
 [project.optional-dependencies]
 pdf = ["pypdf>=3.9"]
 docx = ["python-docx>=1.0"]
-# ONNX Runtime acceleration. OPT-IN — not included in [full] because the
-# optimum/transformers/onnxruntime version matrix is fragile on a fresh
-# install (optimum 2.x removed ORTModelForFeatureExtraction; transformers
-# 5.x broke optimum 1.x's loader chain; onnxruntime-gpu installs on CPU-only
-# boxes). Pinning tight windows keeps fresh installs working.
-#
-# Users who want GPU or low-latency CPU: `pip install "getbased-rag[full,onnx]"`.
-# Users who want reliability: `pip install "getbased-rag[full]"` — the
-# default LocalEmbedder (sentence-transformers / PyTorch CPU) just works
-# with zero config. ~2-3x slower on CPU than ONNX but bulletproof.
-onnx = [
+# ONNX acceleration. `full` now includes it by default — the install
+# is small (~200 MB vs the old ~2 GB) because we load pre-exported
+# ONNX weights from HuggingFace directly, skipping optimum and the
+# PyTorch→ONNX conversion step. Three pure-Python/native deps:
+#   - onnxruntime  (inference, ~100 MB CPU build)
+#   - huggingface-hub  (model download, ~2 MB)
+#   - tokenizers  (Rust-backed fast tokenizer, ~5 MB)
+# Install without ONNX (fall back to sentence-transformers / PyTorch
+# CPU): `pip install getbased-rag`. The sentence-transformers dep
+# already in core gets you the default LocalEmbedder path — ~2-3x
+# slower than ONNX but zero extra config.
+full = [
+    "pypdf>=3.9",
+    "python-docx>=1.0",
     "onnxruntime>=1.17",
-    # optimum 2.x removed ORTModelForFeatureExtraction (used by embedder.py).
-    # Hold at 1.x until embedder is updated to the new API.
-    "optimum[onnxruntime]>=1.17,<2.0",
-    # optimum 1.x expects transformers <4.58. Our embedder doesn't touch
-    # the Trainer class (CVE GHSA-pj3j-xmh8-xrqj is scoped to Trainer),
-    # so staying on 4.x is safe — Dependabot flags are won't-fix here.
-    "transformers>=4.36,<4.58",
+    "huggingface-hub>=0.20",
+    "tokenizers>=0.15",
 ]
-full = ["pypdf>=3.9", "python-docx>=1.0"]
 test = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.scripts]

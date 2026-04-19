@@ -77,19 +77,44 @@ _MODEL_DIMS: dict[str, int] = {
 }
 
 
+# ── ONNX model → pre-exported HF repo map ─────────────────────────
+# Every entry maps a "canonical" model name (the one we expose in our
+# /models API and config) to a HuggingFace repo that already ships
+# pre-exported ONNX weights. Using pre-exported models lets us skip
+# the PyTorch→ONNX conversion step entirely — no optimum dep, no
+# transformers dep, no /tmp space requirement.
+_ONNX_REPO_MAP: dict[str, str] = {
+    "sentence-transformers/all-MiniLM-L6-v2": "Xenova/all-MiniLM-L6-v2",
+    "all-MiniLM-L6-v2": "Xenova/all-MiniLM-L6-v2",
+    "sentence-transformers/all-MiniLM-L12-v2": "Xenova/all-MiniLM-L12-v2",
+    "all-MiniLM-L12-v2": "Xenova/all-MiniLM-L12-v2",
+    "BAAI/bge-small-en-v1.5": "Xenova/bge-small-en-v1.5",
+    "BAAI/bge-base-en-v1.5": "Xenova/bge-base-en-v1.5",
+    "BAAI/bge-large-en-v1.5": "Xenova/bge-large-en-v1.5",
+    "BAAI/bge-m3": "Xenova/bge-m3",
+}
+
+
 # ── ONNX Runtime (preferred) ─────────────────────────────────────
 
 class OnnxEmbedder(Embedder):
     """Embedding via ONNX Runtime — light, fast, GPU-accelerated.
 
-    Uses optimum (HuggingFace) to load ONNX-exported models with
-    provider selection: CUDA, ROCm, OpenVINO, CoreML, or CPU.
+    Loads pre-exported ONNX weights directly from HuggingFace via
+    huggingface_hub — no optimum, no transformers, no PyTorch→ONNX
+    conversion step. The tokenizer is loaded from `tokenizer.json`
+    via the `tokenizers` Rust-backed library, which reads the
+    fast-tokenizer config without pulling the transformers package.
 
-    Provider is set via LENS_ONNX_PROVIDER env var (by Tauri wrapper).
-    Falls back to CPU if the requested provider isn't available.
+    Provider is set via LENS_ONNX_PROVIDER env var. Falls back to CPU
+    if the requested provider isn't available at runtime.
+
+    Canonical model names (all-MiniLM-L6-v2, BAAI/bge-m3, etc.) are
+    mapped to community ONNX re-exports at import time — see
+    _ONNX_REPO_MAP. Users can also pass a HuggingFace repo id directly
+    and we'll try to load from it as-is (useful for custom finetunes).
     """
 
-    # Map our provider names to onnxruntime provider strings
     _PROVIDER_MAP: dict[str, list[str]] = {
         "cuda": ["CUDAExecutionProvider", "CPUExecutionProvider"],
         "rocm": ["ROCmExecutionProvider", "CPUExecutionProvider"],
@@ -98,12 +123,15 @@ class OnnxEmbedder(Embedder):
         "cpu": ["CPUExecutionProvider"],
     }
 
-    def __init__(self, model_name: str = "BAAI/bge-m3", provider: str = ""):
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2", provider: str = ""):
         self._model_name = model_name
+        self._onnx_repo = _ONNX_REPO_MAP.get(model_name, model_name)
         self._provider_name = provider
         self._session = None
         self._tokenizer = None
         self._dim: int | None = None
+        self._needs_token_type_ids = False
+        self._max_seq_len = 512  # overridden per-model on load
 
     # lazy init --------------------------------------------------------
 
@@ -113,168 +141,206 @@ class OnnxEmbedder(Embedder):
 
         import onnxruntime as ort
 
-        # Resolve provider
         providers = self._resolve_providers(ort)
         log.info(
-            "Loading ONNX model: %s (providers=%s)",
-            self._model_name, providers,
+            "Loading ONNX model: %s (repo=%s, providers=%s)",
+            self._model_name, self._onnx_repo, providers,
         )
 
-        # Find or download ONNX model files
         model_dir = self._resolve_model_dir()
+        onnx_file = self._find_onnx_file(model_dir)
 
-        # Look for ONNX files
-        onnx_file = model_dir / "model.onnx"
-        if not onnx_file.exists():
-            onnx_file = model_dir / "model_optimized.onnx"
-        if not onnx_file.exists():
-            # Try any .onnx file
-            onnx_files = list(model_dir.glob("*.onnx"))
-            if onnx_files:
-                onnx_file = onnx_files[0]
-            else:
-                raise FileNotFoundError(
-                    f"No ONNX model files found in {model_dir}. "
-                    "Run setup or download model manually."
-                )
-
-        # Create session
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
         self._session = ort.InferenceSession(
             str(onnx_file),
             sess_options=sess_options,
             providers=providers,
         )
 
-        # Log actual provider
         active = self._session.get_providers()
         log.info("ONNX session active providers: %s", active)
 
-        # Load tokenizer
-        self._load_tokenizer(model_dir)
+        # Does this model want token_type_ids? BERT-family yes, many
+        # modern embeddings no. Inspect the session's declared inputs.
+        input_names = {inp.name for inp in self._session.get_inputs()}
+        self._needs_token_type_ids = "token_type_ids" in input_names
 
-        # Detect dimension from model output
+        # Tokenizer — tokenizers lib reads tokenizer.json natively.
+        from tokenizers import Tokenizer
+
+        tok_file = model_dir / "tokenizer.json"
+        if not tok_file.exists():
+            raise FileNotFoundError(
+                f"tokenizer.json not found in {model_dir}. The repo "
+                f"{self._onnx_repo!r} may not ship a fast tokenizer."
+            )
+        self._tokenizer = Tokenizer.from_file(str(tok_file))
+
+        # BGE-M3 has 8192 context; most others 512. Read model_max_length
+        # from the tokenizer config if present, else use a name-based
+        # heuristic.
+        self._max_seq_len = self._detect_max_len(model_dir)
+
+        # Dimension: prefer known; else probe with a short input
         self._dim = self._detect_dimension()
-        log.info("ONNX model ready (dim=%d, provider=%s)", self._dim, active[0])
+        log.info(
+            "ONNX model ready (dim=%d, provider=%s, max_len=%d)",
+            self._dim, active[0], self._max_seq_len,
+        )
 
     def _resolve_providers(self, ort) -> list[str]:
-        """Resolve the ONNX provider chain from config + available providers."""
         available = ort.get_available_providers()
         log.debug("Available ONNX providers: %s", available)
-
         if self._provider_name and self._provider_name in self._PROVIDER_MAP:
             requested = self._PROVIDER_MAP[self._provider_name]
-            # Filter to only what's actually available
             resolved = [p for p in requested if p in available]
             if resolved:
                 return resolved
             log.warning(
-                "Requested provider '%s' not available (have: %s), falling back to CPU",
+                "Requested provider '%s' not available (have: %s), falling back",
                 self._provider_name, available,
             )
-
-        # Auto-detect: pick best available
         for provider_key in ("cuda", "rocm", "openvino", "coreml"):
             chain = self._PROVIDER_MAP[provider_key]
             if any(p in available for p in chain):
                 return [p for p in chain if p in available]
-
         return ["CPUExecutionProvider"]
 
     def _resolve_model_dir(self) -> Path:
-        """Find the ONNX model directory.
+        """Download (or reuse cached) ONNX model files from HuggingFace.
 
-        Checks (in order):
-        1. LENS_DATA_DIR env var (set by Tauri wrapper) — most reliable
-        2. Platform-correct getbased data dir (Linux/Mac/Windows)
-        3. HuggingFace hub cache (~/.cache/huggingface)
-        4. Optimum auto-download as last resort
+        Uses huggingface_hub.snapshot_download with a tight allow_patterns
+        list — we only pull what we need (model.onnx, tokenizer.json,
+        config.json). Skips the conversion step entirely, so there's no
+        `/tmp` space requirement for `.onnx.data` files.
+
+        Cache honours the standard HF_HOME / HUGGINGFACE_HUB_CACHE env
+        vars so models co-locate with any other HF-using tool on the
+        same machine.
         """
-        # 1. Tauri wrapper sets LENS_DATA_DIR explicitly — trust it
-        env_dir = os.environ.get("LENS_DATA_DIR")
-        candidates_to_search = []
-        if env_dir:
-            candidates_to_search.append(Path(env_dir) / "models")
+        # If already present in a known local location, use it — avoids
+        # a network touch every first-call.
+        for local in self._local_candidates():
+            if local and (local / "tokenizer.json").exists():
+                if self._find_onnx_file_silent(local) is not None:
+                    log.info("Using cached ONNX model at %s", local)
+                    return local
 
-        # 2. Fallback to platform-correct default getbased data dir
-        candidates_to_search.extend(_platform_getbased_data_dirs())
-
-        for tauri_models in candidates_to_search:
-            if not tauri_models.exists():
-                continue
-            # huggingface_hub snapshot_download creates models--{slug}/snapshots/{rev}/
-            for cached_model in tauri_models.glob("models--*"):
-                snapshots = cached_model / "snapshots"
-                if not snapshots.exists():
-                    continue
-                snap_dirs = sorted(snapshots.iterdir(), reverse=True)
-                for snap in snap_dirs:
-                    if (snap / "model.onnx").exists() or list(snap.glob("*.onnx")):
-                        return snap
-
-        # Check HuggingFace cache
-        hf_cache = Path.home() / ".cache" / "huggingface" / "hub"
-        if hf_cache.exists():
-            # Normalize model name: BAAI/bge-m3 → models--BAAI--bge-m3
-            model_slug = self._model_name.replace("/", "--")
-            model_hub_dir = hf_cache / f"models--{model_slug}"
-            if model_hub_dir.exists():
-                snapshots = model_hub_dir / "snapshots"
-                if snapshots.exists():
-                    snap_dirs = sorted(snapshots.iterdir(), reverse=True)
-                    for snap in snap_dirs:
-                        if list(snap.glob("*.onnx")):
-                            return snap
-
-        # Fallback: try loading via optimum which handles download
-        return self._download_via_optimum()
-
-    def _download_via_optimum(self) -> Path:
-        """Download model via optimum if not found locally."""
+        # Download from HF
         try:
-            from optimum.onnxruntime import ORTModelForFeatureExtraction
-            from transformers import AutoTokenizer
-
-            log.info("Downloading ONNX model via optimum: %s", self._model_name)
-            model = ORTModelForFeatureExtraction.from_pretrained(
-                self._model_name, export=True
-            )
-            tokenizer = AutoTokenizer.from_pretrained(self._model_name)
-
-            # Save to a local cache
-            cache_dir = (
-                Path.home() / ".cache" / "getbased" / "onnx_models" / self._model_name.replace("/", "--")
-            )
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            model.save_pretrained(cache_dir)
-            tokenizer.save_pretrained(cache_dir)
-            log.info("ONNX model cached to %s", cache_dir)
-            return cache_dir
-        except ImportError:
+            from huggingface_hub import snapshot_download
+        except ImportError as e:
             raise ImportError(
-                "optimum not installed. Install with: pip install optimum[onnxruntime]"
-            )
+                "ONNX backend requires `huggingface_hub` and `tokenizers`. "
+                "Install with: pip install 'getbased-rag[full]'"
+            ) from e
 
-    def _load_tokenizer(self, model_dir: Path) -> None:
-        """Load the tokenizer for the model."""
-        from transformers import AutoTokenizer
-        self._tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
+        log.info("Downloading ONNX weights from HF: %s", self._onnx_repo)
+        local = snapshot_download(
+            repo_id=self._onnx_repo,
+            allow_patterns=[
+                "onnx/model.onnx",
+                "onnx/model.onnx_data",
+                "onnx/model_quantized.onnx",
+                "model.onnx",
+                "model.onnx_data",
+                "tokenizer.json",
+                "tokenizer_config.json",
+                "config.json",
+                "special_tokens_map.json",
+            ],
+        )
+        return Path(local)
+
+    def _local_candidates(self) -> list[Path]:
+        """Candidate local paths to check before hitting the network."""
+        out: list[Path] = []
+        # LENS_DATA_DIR / models / models--{slug}/snapshots/{rev}/ —
+        # where huggingface_hub drops files when HF_HOME is set there.
+        env_dir = os.environ.get("LENS_DATA_DIR")
+        if env_dir:
+            models = Path(env_dir) / "models"
+            if models.exists():
+                out.extend(self._snapshot_dirs(models))
+        # Platform default getbased data dir
+        for d in _platform_getbased_data_dirs():
+            if d.exists():
+                out.extend(self._snapshot_dirs(d))
+        # Standard HF hub cache
+        hf_cache = Path(
+            os.environ.get("HF_HOME", "") or Path.home() / ".cache" / "huggingface"
+        ) / "hub"
+        if hf_cache.exists():
+            out.extend(self._snapshot_dirs(hf_cache))
+        return out
+
+    def _snapshot_dirs(self, root: Path) -> list[Path]:
+        """All snapshot dirs under `root` that match our ONNX repo id."""
+        slug = self._onnx_repo.replace("/", "--")
+        repo_dir = root / f"models--{slug}"
+        if not repo_dir.exists():
+            return []
+        snap = repo_dir / "snapshots"
+        if not snap.exists():
+            return []
+        return sorted(snap.iterdir(), reverse=True)
+
+    def _find_onnx_file(self, model_dir: Path) -> Path:
+        """Pick the best ONNX weights file, falling back through options."""
+        found = self._find_onnx_file_silent(model_dir)
+        if found is None:
+            raise FileNotFoundError(
+                f"No .onnx files found in {model_dir}. The repo "
+                f"{self._onnx_repo!r} may not include ONNX weights."
+            )
+        return found
+
+    def _find_onnx_file_silent(self, model_dir: Path) -> Path | None:
+        for candidate in (
+            model_dir / "onnx" / "model.onnx",
+            model_dir / "model.onnx",
+            model_dir / "onnx" / "model_quantized.onnx",
+        ):
+            if candidate.exists():
+                return candidate
+        # Last-ditch glob
+        for onnx_file in model_dir.rglob("*.onnx"):
+            return onnx_file
+        return None
+
+    def _detect_max_len(self, model_dir: Path) -> int:
+        """Read model_max_length from tokenizer_config.json if present.
+        Falls back to 8192 for BGE-M3 (long-context), 512 otherwise."""
+        import json as _json
+
+        cfg = model_dir / "tokenizer_config.json"
+        if cfg.exists():
+            try:
+                data = _json.loads(cfg.read_text())
+                ml = int(data.get("model_max_length", 0))
+                # Some HF tokenizers ship a sentinel ≈1e30 meaning "no
+                # cap"; treat anything absurd as 512 fallback.
+                if 32 <= ml <= 16384:
+                    return ml
+            except (ValueError, _json.JSONDecodeError):
+                pass
+        return 8192 if "bge-m3" in self._model_name.lower() else 512
 
     def _detect_dimension(self) -> int:
-        """Detect embedding dimension from model output shape."""
-        # Try known dimensions first
         if self._model_name in _MODEL_DIMS:
             return _MODEL_DIMS[self._model_name]
-
-        # Probe with a dummy input
+        # Probe with the live session + tokenizer
         import numpy as np
 
-        encoded = self._tokenizer("test", padding=True, truncation=True, return_tensors="np")
-        outputs = self._session.run(None, dict(encoded))
-        # Last hidden state shape: [batch, seq_len, dim]
-        return outputs[0].shape[-1]
+        enc = self._tokenizer.encode("probe")
+        ids = np.array([enc.ids], dtype=np.int64)
+        mask = np.array([enc.attention_mask], dtype=np.int64)
+        inputs = {"input_ids": ids, "attention_mask": mask}
+        if self._needs_token_type_ids:
+            inputs["token_type_ids"] = np.zeros_like(ids)
+        outputs = self._session.run(None, inputs)
+        return int(outputs[0].shape[-1])
 
     # public API -------------------------------------------------------
 
@@ -282,40 +348,36 @@ class OnnxEmbedder(Embedder):
         self._load()
         import numpy as np
 
-        # Per-model max_length: BGE-M3 supports 8192; most others top at 512.
-        # Truncating BGE-M3 at 512 throws away its main long-context advantage.
-        max_len = 8192 if "bge-m3" in self._model_name.lower() else 512
+        # Enable fixed-length padding + truncation inside the tokenizer
+        # so `encode_batch` returns arrays we can stack. The `tokenizers`
+        # lib handles padding server-side (no numpy padding dance).
+        self._tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
+        self._tokenizer.enable_truncation(max_length=self._max_seq_len)
 
-        encoded = self._tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=max_len,
-            return_tensors="np",
+        encodings = self._tokenizer.encode_batch(texts)
+        input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
+        attention_mask = np.array(
+            [e.attention_mask for e in encodings], dtype=np.int64
         )
 
-        outputs = self._session.run(None, dict(encoded))
-        # outputs[0] = last_hidden_state: [batch, seq_len, dim]
-        embeddings = outputs[0]
+        inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+        if self._needs_token_type_ids:
+            inputs["token_type_ids"] = np.zeros_like(input_ids)
 
-        # Pooling: BGE-M3 + most modern embedding models use mean pooling.
-        # CLS pooling is correct for original BERT but produces wrong vectors here.
-        if len(embeddings.shape) == 3:
-            mask = encoded.get("attention_mask")
-            if mask is not None:
-                # Masked mean: only average non-padding tokens
-                mask_expanded = np.expand_dims(mask, -1).astype(embeddings.dtype)
-                summed = (embeddings * mask_expanded).sum(axis=1)
-                counts = np.clip(mask_expanded.sum(axis=1), a_min=1e-9, a_max=None)
-                embeddings = summed / counts
-            else:
-                embeddings = embeddings.mean(axis=1)
+        outputs = self._session.run(None, inputs)
+        embeddings = outputs[0]  # (batch, seq, hidden) — last hidden state
 
-        # L2 normalize for cosine similarity
+        # Mean pool with attention mask, then L2 normalise.
+        # Matches sentence-transformers' default for MiniLM, BGE, etc.
+        if embeddings.ndim == 3:
+            mask_f = attention_mask[..., np.newaxis].astype(embeddings.dtype)
+            summed = (embeddings * mask_f).sum(axis=1)
+            counts = np.clip(mask_f.sum(axis=1), a_min=1e-9, a_max=None)
+            embeddings = summed / counts
+
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1, norms)
         embeddings = embeddings / norms
-
         return embeddings.tolist()
 
     def dimension(self) -> int:
@@ -327,9 +389,6 @@ class OnnxEmbedder(Embedder):
         return self._dim  # type: ignore[return-value]
 
     def info(self) -> dict:
-        # Prefer the actually-active provider from the live ORT session
-        # if the model is loaded; fall back to the configured name so
-        # the UI has something to show even before the first encode().
         active = None
         if self._session is not None:
             try:
@@ -341,6 +400,7 @@ class OnnxEmbedder(Embedder):
         return {
             "engine": "onnx",
             "model": self._model_name,
+            "onnx_repo": self._onnx_repo,
             "provider": active or (self._provider_name or "auto"),
             "dimension": self.dimension(),
             "loaded": self._session is not None,
@@ -516,31 +576,15 @@ def create_embedder(config: LensConfig) -> Embedder:
 
 
 def _onnx_available() -> bool:
-    """ONNX path needs BOTH onnxruntime AND optimum (for the HF model
-    loader). Checking onnxruntime alone isn't enough — users who have
-    it for other reasons but lack optimum would hit the ONNX branch
-    and crash on import. Defensive check keeps the factory stable when
-    the environment is partially-provisioned.
-
-    optimum ≥ 2.0 removed `ORTModelForFeatureExtraction` which
-    OnnxEmbedder uses — treat 2.x as "not available" until embedder
-    is updated to the post-2.0 API. Users with 2.x installed will
-    quietly fall back to the sentence-transformers path instead of
-    crashing on model load.
-    """
-    try:
-        import onnxruntime  # noqa: F401
-    except ImportError:
-        return False
-    try:
-        import optimum  # noqa: F401
-        # Version-gate: 2.x removed the API we use.
-        import importlib.metadata as _meta
-
-        ver = _meta.version("optimum")
-        major = int(ver.split(".", 1)[0])
-        if major >= 2:
+    """ONNX path needs three pure-Python / native deps to be installed:
+    onnxruntime (inference), huggingface_hub (download), tokenizers
+    (fast tokenizer). If any is missing we transparently fall back to
+    sentence-transformers. No more optimum / transformers involvement —
+    removed in v0.7 to avoid the PyTorch→ONNX conversion chain
+    entirely (see `OnnxEmbedder` docstring)."""
+    for mod in ("onnxruntime", "huggingface_hub", "tokenizers"):
+        try:
+            __import__(mod)
+        except ImportError:
             return False
-    except (ImportError, Exception):
-        return False
     return True
