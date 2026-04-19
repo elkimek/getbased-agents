@@ -600,10 +600,17 @@ def create_app(config: LensConfig) -> FastAPI:
 
         if want_stream:
             import asyncio as _asyncio
+            import threading as _threading
 
             queue: _asyncio.Queue = _asyncio.Queue()
             _SENTINEL = object()
             loop = _asyncio.get_running_loop()
+            # Cancel flag checked by the worker thread between chunk
+            # batches. Set when the client disconnects (user clicks
+            # Cancel in the UI → browser aborts the fetch → we detect
+            # via request.is_disconnected). Worker exits cleanly with
+            # cancelled=True in its result dict.
+            cancel_event = _threading.Event()
 
             def _sync_on_event(evt: dict) -> None:
                 # Called from the worker thread. Hand the event to the
@@ -621,6 +628,7 @@ def create_app(config: LensConfig) -> FastAPI:
                         embedder_obj,
                         backend_obj,
                         _sync_on_event,
+                        cancel_event.is_set,
                     )
                     queue.put_nowait({"event": "result", **result})
                 except FileNotFoundError as e:
@@ -633,8 +641,24 @@ def create_app(config: LensConfig) -> FastAPI:
                 finally:
                     queue.put_nowait(_SENTINEL)
 
+            async def _watch_disconnect() -> None:
+                # Poll request.is_disconnected every second. When the
+                # client drops (user cancel, tab close, network hiccup)
+                # set the cancel flag so the worker exits at its next
+                # batch boundary rather than completing a now-useless
+                # ingest to the end.
+                try:
+                    while not cancel_event.is_set():
+                        if await request.is_disconnected():
+                            cancel_event.set()
+                            break
+                        await _asyncio.sleep(1.0)
+                except _asyncio.CancelledError:
+                    pass
+
             async def _ndjson_gen():
-                task = _asyncio.create_task(_run_ingest())
+                ingest_task = _asyncio.create_task(_run_ingest())
+                watch_task = _asyncio.create_task(_watch_disconnect())
                 try:
                     while True:
                         item = await queue.get()
@@ -642,12 +666,15 @@ def create_app(config: LensConfig) -> FastAPI:
                             break
                         yield (json.dumps(item) + "\n").encode()
                 finally:
-                    # If the client disconnected early, cancel + wait.
-                    if not task.done():
-                        task.cancel()
+                    # Stop the disconnect watcher; signal ingest to
+                    # cancel in case we got here via an upstream error
+                    # rather than natural completion.
+                    cancel_event.set()
+                    watch_task.cancel()
+                    if not ingest_task.done():
                         try:
-                            await task
-                        except (_asyncio.CancelledError, Exception):
+                            await _asyncio.wait_for(ingest_task, timeout=5.0)
+                        except (_asyncio.CancelledError, _asyncio.TimeoutError, Exception):
                             pass
                     _cleanup_tmpdir()
 

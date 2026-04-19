@@ -253,41 +253,106 @@ code {
 .ingest-status.ok { color: var(--ok); }
 .ingest-status.err { color: var(--danger); }
 
-.ingest-progress {
-  margin-top: 14px;
-  text-align: left;
-  max-width: 480px;
-  margin-left: auto;
-  margin-right: auto;
+/* Bottom-right fixed pill — matches the getbased PWA's ingest UX. */
+.ingest-pill {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  min-width: 260px;
+  max-width: 360px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  z-index: 9999;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  color: var(--text);
 }
-.progress-head {
+.ingest-pill.ok { border-color: var(--ok); }
+.ingest-pill.err { border-color: var(--danger); }
+.pill-head {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
-  color: var(--text-dim);
+  align-items: center;
   margin-bottom: 6px;
-  gap: 12px;
 }
-.progress-label {
+.pill-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.pill-dismiss {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.pill-dismiss:hover { color: var(--text); }
+.pill-status {
   font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-bottom: 6px;
 }
-.progress-count { font-variant-numeric: tabular-nums; color: var(--text); }
-.progress-track {
+.pill-progress {
+  width: 100%;
   height: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
   background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: 999px;
   overflow: hidden;
+  display: block;
+  margin: 2px 0 6px;
 }
-.progress-fill {
-  height: 100%;
+.pill-progress::-webkit-progress-bar {
+  background: var(--bg);
+  border-radius: 999px;
+}
+.pill-progress::-webkit-progress-value {
   background: var(--accent);
-  width: 0%;
+  border-radius: 999px;
   transition: width 0.15s ease-out;
 }
+.pill-progress::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: 999px;
+}
+.ingest-pill.err .pill-progress::-webkit-progress-value { background: var(--danger); }
+.ingest-pill.err .pill-progress::-moz-progress-bar { background: var(--danger); }
+.pill-sub {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 10px;
+}
+.pill-rate { color: var(--accent); font-weight: 500; }
+.ingest-pill.err .pill-rate { color: var(--danger); }
+.pill-cancel {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pill-cancel:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+.pill-cancel:disabled { opacity: 0.6; cursor: wait; }
 
 .engine-strip {
   display: flex;

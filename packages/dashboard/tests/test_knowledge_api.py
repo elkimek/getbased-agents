@@ -366,13 +366,13 @@ def test_ingest_streams_ndjson_events_when_accept_requested(
 ) -> None:
     """Browser sends `Accept: application/x-ndjson`; dashboard forwards
     the Accept header upstream and pipes each line of rag's stream back
-    to the client verbatim. UI's fetch+reader loop sees start/file/result
-    events identical to what rag emitted."""
+    to the client verbatim. UI's fetch+reader loop sees start/embed/
+    result events identical to what rag emitted."""
     ndjson_body = (
-        '{"event":"start","total":2}\n'
-        '{"event":"file","index":1,"total":2,"source":"a.md","chunks":3}\n'
-        '{"event":"file","index":2,"total":2,"source":"b.md","chunks":5}\n'
-        '{"event":"result","files_seen":2,"chunks_indexed":8,"skipped":[]}\n'
+        '{"event":"start","total":8}\n'
+        '{"event":"embed","index":5,"total":8,"source":"a.md"}\n'
+        '{"event":"embed","index":8,"total":8,"source":"b.md"}\n'
+        '{"event":"result","files_seen":2,"chunks_indexed":8,"chunks_planned":8,"cancelled":false,"skipped":[]}\n'
     )
     respx.post(f"{RAG_BASE}/ingest").mock(
         return_value=Response(
@@ -394,7 +394,9 @@ def test_ingest_streams_ndjson_events_when_accept_requested(
 
     events = [_json.loads(l) for l in lines]
     assert events[0]["event"] == "start"
-    assert events[0]["total"] == 2
+    assert events[0]["total"] == 8
+    embeds = [e for e in events if e.get("event") == "embed"]
+    assert len(embeds) == 2
     assert events[-1]["event"] == "result"
     assert events[-1]["chunks_indexed"] == 8
 

@@ -441,13 +441,14 @@ def test_ingest_expands_zip_inside_uploaded_dir(
     assert any("doc-b.md" in s for s in sources), sources
 
 
-def test_ingest_ndjson_stream_emits_start_file_and_result_events(
+def test_ingest_ndjson_stream_emits_start_embed_and_result_events(
     client: TestClient, auth: dict
 ) -> None:
     """With Accept: application/x-ndjson, rag emits a progress stream:
-    one `start` event (with total count), one `file` event per file, and
-    a terminal `result` event with the summary. UI consumes these to
-    draw a live progress bar."""
+    one `start` event (total chunks), one or more `embed` events
+    (index → total), and a terminal `result` event with the summary.
+    Matches the browser-local lens's event shape so the UI code can
+    draw a per-chunk progress bar + live chunks/sec rate."""
     r = client.post(
         "/ingest",
         headers={**auth, "Accept": "application/x-ndjson"},
@@ -457,22 +458,66 @@ def test_ingest_ndjson_stream_emits_start_file_and_result_events(
         ],
     )
     assert r.status_code == 200
-    # Body is line-delimited JSON
     lines = [l for l in r.text.splitlines() if l.strip()]
     events = [__import__("json").loads(l) for l in lines]
     starts = [e for e in events if e.get("event") == "start"]
-    files = [e for e in events if e.get("event") == "file"]
+    embeds = [e for e in events if e.get("event") == "embed"]
     results = [e for e in events if e.get("event") == "result"]
     errors = [e for e in events if e.get("event") == "error"]
 
     assert len(starts) == 1, events
-    assert starts[0]["total"] == 2
-    assert len(files) == 2, events
-    assert {f["source"] for f in files} == {"one.md", "two.md"}
+    # total is now chunk count (≥ file count), matches PWA semantics
+    assert starts[0]["total"] >= 2
+    assert embeds, events
+    # Final embed reaches total
+    assert embeds[-1]["index"] == starts[0]["total"]
+    # Source field present on every embed event
+    assert all("source" in e for e in embeds)
     assert len(results) == 1, events
     assert results[0]["files_seen"] == 2
     assert results[0]["chunks_indexed"] >= 2
+    assert results[0]["chunks_planned"] >= 2
+    assert results[0]["cancelled"] is False
     assert not errors
+
+
+def test_ingest_respects_should_cancel_flag(config, patched_embedder, shared_qdrant, tmp_path) -> None:
+    """Ingest honours the should_cancel callable — when it returns True,
+    the worker stops at the next batch boundary and returns
+    cancelled=True in stats. Drives the UI's Cancel button: aborting
+    the fetch sets a server-side flag that this callback exposes."""
+    from lens.ingest import ingest_path
+
+    # Write a handful of source files
+    src = tmp_path / "src"
+    src.mkdir()
+    for i in range(5):
+        (src / f"f{i}.md").write_text(f"# file {i}\n" + ("content " * 200))
+
+    # Cancel immediately — first batch never flushes
+    result = ingest_path(config, src, should_cancel=lambda: True)
+    assert result["cancelled"] is True
+    assert result["chunks_indexed"] == 0
+    # chunks_planned still reports how many were discovered in pass 1
+    assert result["chunks_planned"] >= 0
+
+
+def test_ingest_result_has_planned_and_cancelled_fields(
+    client: TestClient, auth: dict
+) -> None:
+    """Non-cancelled happy-path result carries both chunks_planned
+    (what pass 1 discovered) and chunks_indexed (what pass 2 embedded).
+    On success these match. UI uses chunks_planned for the "cancelled —
+    indexed X of Y" fallback message."""
+    r = client.post(
+        "/ingest",
+        headers=auth,
+        files=[("files", ("x.md", b"# x\n" + b"y " * 200, "text/markdown"))],
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["cancelled"] is False
+    assert body["chunks_indexed"] == body["chunks_planned"]
 
 
 def test_ingest_ndjson_stream_reports_error_as_event(

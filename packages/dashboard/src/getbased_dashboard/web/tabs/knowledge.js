@@ -19,6 +19,214 @@ let _models = { default: "", models: [] };
 // re-entered from scratch or when a new ingest starts.
 let _lastIngest = null; // { text: string, cls: "ok" | "err" | "" }
 
+// Fixed bottom-right pill matching the getbased PWA. Singleton at the
+// <body> level so it survives tab switches — user can start an ingest,
+// move to the MCP or Activity tab, and still see the progress bar +
+// chunks/sec rate without losing state. Mirrors the browser-local lens
+// layout exactly (title row, progress bar, rate line, cancel button).
+let _pill = null;        // DOM element or null
+let _pillAbort = null;   // AbortController for the in-flight fetch
+let _pillAutoDismiss = 0; // setTimeout id
+
+function _ensurePill() {
+  if (_pill && document.body.contains(_pill)) return _pill;
+  const el = document.createElement("div");
+  el.className = "ingest-pill";
+  el.innerHTML = `
+    <div class="pill-head">
+      <span class="pill-title">Indexing knowledge base</span>
+      <button class="pill-dismiss" type="button" title="Hide (ingest keeps running)" aria-label="Hide">×</button>
+    </div>
+    <div class="pill-status">Preparing…</div>
+    <progress class="pill-progress" value="0" max="1"></progress>
+    <div class="pill-sub">
+      <span class="pill-count">0 / 0</span>
+      <span class="pill-rate"></span>
+    </div>
+    <button class="pill-cancel" type="button">Cancel</button>
+  `;
+  document.body.appendChild(el);
+  el.querySelector(".pill-dismiss").addEventListener("click", () => {
+    // Hide the pill but DON'T abort — matches PWA's dismiss-vs-cancel
+    // distinction. User is opting to get it out of their way, not stop
+    // indexing work that's mostly done.
+    el.remove();
+    _pill = null;
+  });
+  el.querySelector(".pill-cancel").addEventListener("click", () => {
+    if (_pillAbort) {
+      _pillAbort.abort();
+      const cancelBtn = el.querySelector(".pill-cancel");
+      cancelBtn.textContent = "Cancelling…";
+      cancelBtn.disabled = true;
+    }
+  });
+  _pill = el;
+  return el;
+}
+
+function _removePillSoon(delay = 3000) {
+  // Auto-dismiss after completion/error, matching the PWA's 3s window.
+  if (_pillAutoDismiss) clearTimeout(_pillAutoDismiss);
+  _pillAutoDismiss = setTimeout(() => {
+    if (_pill && document.body.contains(_pill)) _pill.remove();
+    _pill = null;
+    _pillAutoDismiss = 0;
+  }, delay);
+}
+
+function _pillUpdate({ status, rate, index, total }) {
+  if (!_pill) return;
+  if (status != null) _pill.querySelector(".pill-status").textContent = status;
+  if (total != null) {
+    const bar = _pill.querySelector(".pill-progress");
+    bar.max = Math.max(1, total);
+    bar.value = Math.min(total, index || 0);
+    _pill.querySelector(".pill-count").textContent = `${index || 0} / ${total}`;
+  }
+  _pill.querySelector(".pill-rate").textContent = rate != null ? rate : "";
+}
+
+function _pillComplete(message, kind) {
+  if (!_pill) return;
+  _pill.classList.toggle("err", kind === "err");
+  _pill.classList.toggle("ok", kind === "ok");
+  _pill.querySelector(".pill-status").textContent = message;
+  _pill.querySelector(".pill-cancel").hidden = true;
+  _removePillSoon();
+}
+
+async function runIngest(fd, onSuccess) {
+  // Reset any previous pill auto-dismiss before kicking off a new run.
+  if (_pillAutoDismiss) {
+    clearTimeout(_pillAutoDismiss);
+    _pillAutoDismiss = 0;
+  }
+  const pill = _ensurePill();
+  pill.classList.remove("err", "ok");
+  pill.querySelector(".pill-cancel").hidden = false;
+  pill.querySelector(".pill-cancel").disabled = false;
+  pill.querySelector(".pill-cancel").textContent = "Cancel";
+  _pillUpdate({ status: "Preparing…", rate: "", index: 0, total: 1 });
+
+  _pillAbort = new AbortController();
+  const t0 = performance.now();
+
+  let total = 0;
+  let final = null;
+  let errorMsg = null;
+  let userCancelled = false;
+
+  try {
+    const resp = await authed("/api/knowledge/ingest", {
+      method: "POST",
+      body: fd,
+      headers: { Accept: "application/x-ndjson" },
+      signal: _pillAbort.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => null);
+      throw new Error(_errMessage(body, resp.status, resp.statusText));
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        let evt;
+        try { evt = JSON.parse(line); } catch { continue; }
+        if (evt.event === "start") {
+          total = evt.total || 0;
+          _pillUpdate({
+            status: total ? `Preparing ${total} excerpts…` : "Preparing…",
+            rate: "",
+            index: 0,
+            total: total || 1,
+          });
+        } else if (evt.event === "embed") {
+          const index = evt.index || 0;
+          const t = evt.total || total;
+          const elapsedSec = (performance.now() - t0) / 1000;
+          const rate = elapsedSec > 0 ? (index / elapsedSec).toFixed(1) : "0.0";
+          _pillUpdate({
+            status: evt.source || "",
+            rate: `${rate}/s`,
+            index,
+            total: t,
+          });
+        } else if (evt.event === "result") {
+          final = evt;
+        } else if (evt.event === "error") {
+          errorMsg = evt.message || "ingest failed";
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      userCancelled = true;
+    } else {
+      errorMsg = err.message;
+    }
+  } finally {
+    _pillAbort = null;
+  }
+
+  const dur = ((performance.now() - t0) / 1000).toFixed(1);
+
+  if (errorMsg) {
+    _pillComplete(`Couldn't index: ${errorMsg}`, "err");
+    setStatus(`Failed: ${errorMsg}`, "err");
+    return;
+  }
+  if (userCancelled || (final && final.cancelled)) {
+    const got = final ? final.chunks_indexed : 0;
+    const plan = final ? final.chunks_planned : total || 0;
+    _pillComplete(`Cancelled — indexed ${got} of ${plan} excerpts in ${dur}s.`, "ok");
+    setStatus(`Cancelled — indexed ${got} of ${plan} excerpts.`, "");
+    if (onSuccess) onSuccess();
+    return;
+  }
+  if (!final) {
+    _pillComplete("Stream ended without result", "err");
+    setStatus("Stream ended without result", "err");
+    return;
+  }
+
+  const skipped = (final.skipped || []).length;
+  const msg = `Indexed ${final.chunks_indexed} excerpt${final.chunks_indexed === 1 ? "" : "s"} from ${final.files_seen} file${final.files_seen === 1 ? "" : "s"} in ${dur}s.`;
+  _pillComplete(msg, "ok");
+  setStatus(
+    skipped
+      ? `${msg} Skipped: ${skipped}.`
+      : msg,
+    "ok"
+  );
+  if (onSuccess) onSuccess();
+}
+
+// setStatus is closed over by runIngest at module scope — but each
+// Knowledge tab render creates its own. We replicate the minimum needed
+// here so runIngest can work even if the tab has been re-rendered
+// (or the user has moved to a different tab entirely).
+function setStatus(text, cls) {
+  _lastIngest = { text, cls };
+  // Best-effort DOM update if the Knowledge tab is currently mounted.
+  const el = document.querySelector("#ingest-status");
+  if (el) {
+    el.textContent = text;
+    el.className = `ingest-status ${cls}`;
+  }
+}
+
 function _errMessage(body, status, statusText) {
   // Dashboard's exception_handler normalises to {error: "..."}. Fall back
   // to a stringified shape for old-path / upstream JSON that didn't go
@@ -211,13 +419,6 @@ function renderLibraries(root) {
       <div id="drop-zone" class="drop-zone">
         <p>Drag &amp; drop .md / .txt / .pdf / .docx / .zip here, or <button type="button" id="pick-files-btn" class="link">pick files</button></p>
         <input type="file" id="file-input" class="visually-hidden" multiple />
-        <div id="ingest-progress" class="ingest-progress" hidden>
-          <div class="progress-head">
-            <span id="progress-label" class="progress-label">Starting…</span>
-            <span id="progress-count" class="progress-count"></span>
-          </div>
-          <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
-        </div>
         <div id="ingest-status" class="ingest-status"></div>
       </div>
     </section>
@@ -353,37 +554,9 @@ function wireHandlers(root) {
   // Re-apply any persistent status from a prior ingest so the "Indexed N
   // chunks" confirmation survives the re-render that refreshes the
   // sources list underneath it.
-  if (_lastIngest) {
+  if (_lastIngest && status) {
     status.textContent = _lastIngest.text;
     status.className = `ingest-status ${_lastIngest.cls}`;
-  }
-
-  function setStatus(text, cls) {
-    _lastIngest = { text, cls };
-    status.textContent = text;
-    status.className = `ingest-status ${cls}`;
-  }
-
-  // Progress widget — hidden by default, shown during ingest.
-  const progressEl = root.querySelector("#ingest-progress");
-  const progressLabel = root.querySelector("#progress-label");
-  const progressCount = root.querySelector("#progress-count");
-  const progressFill = root.querySelector("#progress-fill");
-
-  function showProgress() {
-    progressEl.hidden = false;
-    progressLabel.textContent = "Starting…";
-    progressCount.textContent = "";
-    progressFill.style.width = "0%";
-  }
-  function hideProgress() {
-    progressEl.hidden = true;
-  }
-  function updateProgress(done, total, source) {
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    progressFill.style.width = `${pct}%`;
-    progressCount.textContent = `${done} / ${total}`;
-    if (source) progressLabel.textContent = source;
   }
 
   async function doIngest(fileList) {
@@ -391,70 +564,7 @@ function wireHandlers(root) {
     const fd = new FormData();
     for (const f of fileList) fd.append("files", f, f.name);
     setStatus("", "");
-    showProgress();
-
-    try {
-      // Stream NDJSON — rag + dashboard both support the `application/
-      // x-ndjson` accept header, emitting {event:"start"}, {event:"file"}
-      // per processed file, and a final {event:"result"|"error"}.
-      const resp = await authed("/api/knowledge/ingest", {
-        method: "POST",
-        body: fd,
-        headers: { Accept: "application/x-ndjson" },
-      });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => null);
-        throw new Error(_errMessage(body, resp.status, resp.statusText));
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let total = 0;
-      let final = null;
-      let errorMsg = null;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, idx).trim();
-          buffer = buffer.slice(idx + 1);
-          if (!line) continue;
-          let evt;
-          try {
-            evt = JSON.parse(line);
-          } catch {
-            continue; // skip malformed progress line
-          }
-          if (evt.event === "start") {
-            total = evt.total || 0;
-            updateProgress(0, total, "");
-          } else if (evt.event === "file") {
-            updateProgress(evt.index || 0, total || evt.total || 0, evt.source || "");
-          } else if (evt.event === "result") {
-            final = evt;
-          } else if (evt.event === "error") {
-            errorMsg = evt.message || "ingest failed";
-          }
-        }
-      }
-
-      hideProgress();
-      if (errorMsg) throw new Error(errorMsg);
-      if (!final) throw new Error("stream ended without result");
-
-      setStatus(
-        `Indexed ${final.chunks_indexed} chunk(s) from ${final.files_seen} file(s). Skipped: ${(final.skipped || []).length}`,
-        "ok"
-      );
-      render(root); // sources list refresh — preserved status re-applies
-    } catch (err) {
-      hideProgress();
-      setStatus(`Failed: ${err.message}`, "err");
-    }
+    await runIngest(fd, () => render(root));
   }
 
   ["dragenter", "dragover"].forEach((ev) =>
