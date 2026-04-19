@@ -4,10 +4,10 @@ Monorepo for the [getbased](https://getbased.health) agent ecosystem — MCP ser
 
 | Package | PyPI | Role | Contents |
 |---|---|---|---|
-| [`getbased-mcp`](packages/mcp/) | `getbased-mcp` | MCP adapter for Claude Code / Hermes / OpenClaw / any MCP client | stdio ↔ HTTP |
-| [`getbased-rag`](packages/rag/) | `getbased-rag` | Local RAG knowledge server. Also the PWA's "External server" Knowledge Base backend | FastAPI + Qdrant + MiniLM/BGE |
-| [`getbased-dashboard`](packages/dashboard/) | `getbased-dashboard` | Browser UI: manage knowledge libraries, generate MCP client configs, see agent activity | FastAPI + vanilla JS |
-| [`getbased-agent-stack`](packages/stack/) | `getbased-agent-stack` | Meta-package pinning all three siblings | thin CLI + systemd unit + example configs |
+| [`getbased-mcp`](packages/mcp/) | [`getbased-mcp`](https://pypi.org/project/getbased-mcp/) | MCP adapter for Claude Code / Hermes / OpenClaw / any MCP client | stdio ↔ HTTP |
+| [`getbased-rag`](packages/rag/) | [`getbased-rag`](https://pypi.org/project/getbased-rag/) | Local RAG knowledge server. Also the PWA's "External server" Knowledge Base backend | FastAPI + Qdrant + MiniLM/BGE |
+| [`getbased-dashboard`](packages/dashboard/) | [`getbased-dashboard`](https://pypi.org/project/getbased-dashboard/) | Browser UI: manage knowledge libraries, generate MCP client configs, see agent activity | FastAPI + vanilla JS |
+| [`getbased-agent-stack`](packages/stack/) | [`getbased-agent-stack`](https://pypi.org/project/getbased-agent-stack/) | Meta-package pinning all three siblings | thin CLI + systemd unit + example configs |
 
 ```
 Claude Code / Hermes / OpenClaw           Browser
@@ -68,9 +68,9 @@ Per-package details:
 
 ## Releases
 
-Packages release independently — they have their own PyPI entries, their own version numbers, their own tags. Release process per package is documented in its `CONTRIBUTING.md`.
+All four packages publish to PyPI automatically on tag push. Bump a version, commit, tag with `vX.Y.Z` or `<pkg>-vX.Y.Z`, and push the tag — the [publish workflow](.github/workflows/publish.yml) builds every package, uploads the bumped ones, and `skip-existing`s the rest.
 
-The meta-package (`getbased-agent-stack`) bumps only when a sibling protocol change requires coordinated install. See [packages/stack/CONTRIBUTING.md](packages/stack/CONTRIBUTING.md#when-to-bump-this-repo).
+Full step-by-step in [RELEASING.md](RELEASING.md). Meta-package bump policy is in [packages/stack/CONTRIBUTING.md](packages/stack/CONTRIBUTING.md#when-to-bump-this-repo).
 
 ## Repo history
 
