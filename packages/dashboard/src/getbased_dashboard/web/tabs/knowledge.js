@@ -14,10 +14,10 @@ let _stats = { total_chunks: 0, documents: [] };
 let _info = null;
 let _models = { default: "", models: [] };
 
-// Ingest status survives across re-renders so the "Indexed N chunks"
-// confirmation doesn't flash and disappear. Cleared when the tab is
-// re-entered from scratch or when a new ingest starts.
-let _lastIngest = null; // { text: string, cls: "ok" | "err" | "" }
+// (no inline persistent status — the pill is the single source of
+// truth. It auto-dismisses 3s after completion, matching the PWA.
+// A per-library persistent confirmation would lie once the user
+// switches libraries.)
 
 // Fixed bottom-right pill matching the getbased PWA. Singleton at the
 // <body> level so it survives tab switches — user can start an ingest,
@@ -184,47 +184,25 @@ async function runIngest(fd, onSuccess) {
 
   if (errorMsg) {
     _pillComplete(`Couldn't index: ${errorMsg}`, "err");
-    setStatus(`Failed: ${errorMsg}`, "err");
     return;
   }
   if (userCancelled || (final && final.cancelled)) {
     const got = final ? final.chunks_indexed : 0;
     const plan = final ? final.chunks_planned : total || 0;
     _pillComplete(`Cancelled — indexed ${got} of ${plan} excerpts in ${dur}s.`, "ok");
-    setStatus(`Cancelled — indexed ${got} of ${plan} excerpts.`, "");
     if (onSuccess) onSuccess();
     return;
   }
   if (!final) {
     _pillComplete("Stream ended without result", "err");
-    setStatus("Stream ended without result", "err");
     return;
   }
 
   const skipped = (final.skipped || []).length;
-  const msg = `Indexed ${final.chunks_indexed} excerpt${final.chunks_indexed === 1 ? "" : "s"} from ${final.files_seen} file${final.files_seen === 1 ? "" : "s"} in ${dur}s.`;
+  const skippedSuffix = skipped ? ` (skipped ${skipped})` : "";
+  const msg = `Indexed ${final.chunks_indexed} excerpt${final.chunks_indexed === 1 ? "" : "s"} from ${final.files_seen} file${final.files_seen === 1 ? "" : "s"} in ${dur}s${skippedSuffix}.`;
   _pillComplete(msg, "ok");
-  setStatus(
-    skipped
-      ? `${msg} Skipped: ${skipped}.`
-      : msg,
-    "ok"
-  );
   if (onSuccess) onSuccess();
-}
-
-// setStatus is closed over by runIngest at module scope — but each
-// Knowledge tab render creates its own. We replicate the minimum needed
-// here so runIngest can work even if the tab has been re-rendered
-// (or the user has moved to a different tab entirely).
-function setStatus(text, cls) {
-  _lastIngest = { text, cls };
-  // Best-effort DOM update if the Knowledge tab is currently mounted.
-  const el = document.querySelector("#ingest-status");
-  if (el) {
-    el.textContent = text;
-    el.className = `ingest-status ${cls}`;
-  }
 }
 
 function _errMessage(body, status, statusText) {
@@ -419,7 +397,6 @@ function renderLibraries(root) {
       <div id="drop-zone" class="drop-zone">
         <p>Drag &amp; drop .md / .txt / .pdf / .docx / .zip here, or <button type="button" id="pick-files-btn" class="link">pick files</button></p>
         <input type="file" id="file-input" class="visually-hidden" multiple />
-        <div id="ingest-status" class="ingest-status"></div>
       </div>
     </section>
 
@@ -546,24 +523,16 @@ function wireHandlers(root) {
     }
   });
 
-  // Ingest — drag-drop + file input
+  // Ingest — drag-drop + file input. Status is conveyed entirely
+  // through the bottom-right pill; no persistent inline message in the
+  // drop zone (that would lie after the user switches libraries).
   const dz = root.querySelector("#drop-zone");
   const input = root.querySelector("#file-input");
-  const status = root.querySelector("#ingest-status");
-
-  // Re-apply any persistent status from a prior ingest so the "Indexed N
-  // chunks" confirmation survives the re-render that refreshes the
-  // sources list underneath it.
-  if (_lastIngest && status) {
-    status.textContent = _lastIngest.text;
-    status.className = `ingest-status ${_lastIngest.cls}`;
-  }
 
   async function doIngest(fileList) {
     if (!fileList || !fileList.length) return;
     const fd = new FormData();
     for (const f of fileList) fd.append("files", f, f.name);
-    setStatus("", "");
     await runIngest(fd, () => render(root));
   }
 
