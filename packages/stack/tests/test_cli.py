@@ -295,6 +295,57 @@ def test_init_reuses_existing_api_key(stack_home, fake_shell, monkeypatch):
     assert key_path.read_text().strip() == "preexisting_key"
 
 
+def test_init_yes_flag_skips_all_prompts(stack_home, fake_shell, monkeypatch):
+    """`init --yes` must not call input() or getpass() at all. Scripted
+    installers (curl | bash) can't service prompts and the EOF fallback
+    triggers a Python getpass echo warning that pollutes output.
+    Strict assertion: any prompt call fails the test."""
+    def _forbid_input(*a, **kw):
+        raise AssertionError("input() called under --yes")
+
+    def _forbid_getpass(*a, **kw):
+        raise AssertionError("getpass() called under --yes")
+
+    monkeypatch.setattr("builtins.input", _forbid_input)
+    monkeypatch.setattr("getpass.getpass", _forbid_getpass)
+
+    rc, out, _ = _run(["init", "--yes"])
+    assert rc == 0
+    # Banner reflects the mode so the user sees what happened
+    assert "non-interactive" in out.lower()
+    # Env file + units still land
+    assert env_file.env_file_path().exists()
+    assert (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()
+
+
+def test_init_yes_installs_units_without_asking(stack_home, fake_shell, monkeypatch):
+    """Default for the install-units prompt is Yes, so --yes must also
+    install + start. If this regressed to skip, install.sh would
+    silently leave services off."""
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
+
+    _run(["init", "--yes"])
+    # UnitManager.install() writes service files under XDG_CONFIG_HOME
+    assert (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()
+    assert (stack_home / "config" / "systemd" / "user" / "getbased-dashboard.service").exists()
+
+
+def test_init_yes_preserves_existing_token(stack_home, fake_shell, monkeypatch):
+    """Non-interactive mode must not nuke a previously-saved token —
+    it takes the 'keep current' default, same as pressing Enter."""
+    env_file.write_env_file(
+        {"GETBASED_TOKEN": "keep_me", "GETBASED_STACK_MANAGED": "1"}
+    )
+    # No input/getpass expected, but stub defensively in case a future
+    # code path adds an unguarded prompt — test still catches it.
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("input under --yes")))
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("getpass under --yes")))
+
+    _run(["init", "-y"])
+    assert env_file.read_env_file()["GETBASED_TOKEN"] == "keep_me"
+
+
 def test_init_is_reentrant(stack_home, fake_shell, monkeypatch):
     """Running init twice in a row must not break anything — second call
     should be a cheap idempotent update, not a destructive rewrite."""

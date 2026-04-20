@@ -86,7 +86,14 @@ def _yesno(msg: str, default: bool = True) -> bool:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    # --yes / -y runs the full flow with defaults and no prompts. Intended
+    # for scripted installs (curl | bash) where stdin is unavailable and
+    # the EOF-returns-default path still triggers a getpass echo warning.
+    non_interactive = getattr(args, "yes", False)
+
     print("getbased-stack init — one-time setup")
+    if non_interactive:
+        print("Running non-interactive (--yes) — takes default answers on every prompt.")
     print(
         "Writes ~/.config/getbased/env, (optionally) installs + starts systemd\n"
         "user units for rag and dashboard. Idempotent: safe to re-run."
@@ -98,11 +105,15 @@ def cmd_init(args: argparse.Namespace) -> int:
     current_token = existing.get("GETBASED_TOKEN", "")
     masked = "****" + current_token[-4:] if current_token else "(unset)"
     print(f"[1/4] getbased sync token (current: {masked})")
-    token = _prompt(
-        "Paste GETBASED_TOKEN (press Enter to keep current / skip)",
-        default=current_token,
-        secret=True,
-    )
+    if non_interactive:
+        token = current_token
+        print("  keeping current value (set with `getbased-stack set GETBASED_TOKEN=…` later).")
+    else:
+        token = _prompt(
+            "Paste GETBASED_TOKEN (press Enter to keep current / skip)",
+            default=current_token,
+            secret=True,
+        )
 
     # 2. API key
     key_path = Path(existing.get("LENS_API_KEY_FILE", str(_default_api_key_file())))
@@ -127,7 +138,10 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     # 4. install units
     print("\n[4/4] install systemd user units?")
-    if _yesno("install + start getbased-rag + getbased-dashboard?", default=True):
+    install_units = True if non_interactive else _yesno(
+        "install + start getbased-rag + getbased-dashboard?", default=True
+    )
+    if install_units:
         mgr = units.UnitManager()
         for line in mgr.install(enable=True, start=True):
             print(f"  {line}")
@@ -304,7 +318,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="command")
 
-    sub.add_parser("init", help="Interactive one-time setup (token, API key, units).")
+    pinit = sub.add_parser(
+        "init", help="Interactive one-time setup (token, API key, units)."
+    )
+    pinit.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Non-interactive: take defaults on every prompt. Use for scripted installs.",
+    )
 
     pi = sub.add_parser("install", help="Install + start the systemd user units.")
     pi.add_argument("--no-enable", action="store_true", help="Copy files only; don't enable.")
