@@ -161,6 +161,12 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def _print_linger_hint(strict: bool) -> None:
+    # If systemctl isn't even available, the linger question is moot —
+    # we've already printed a clearer "systemd not available, unit files
+    # written but not activated" message above. Adding "services will
+    # stop on logout" here would mislead (there aren't any services).
+    if shutil.which("systemctl") is None:
+        return
     user = os.environ.get("USER", "")
     if not user:
         return

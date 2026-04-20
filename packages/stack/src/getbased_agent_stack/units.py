@@ -44,7 +44,14 @@ class CommandResult:
 
 
 def _real_shell(cmd: "list[str]") -> CommandResult:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # FileNotFoundError when the binary isn't on PATH — happens on systems
+    # without systemd (Docker containers, macOS, WSL1). Return a shell-like
+    # 127 instead of propagating so callers can handle "not available" the
+    # same way they handle "failed" without an unhandled traceback.
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        return CommandResult(127, "", f"command not found: {cmd[0]}")
     return CommandResult(proc.returncode, proc.stdout, proc.stderr)
 
 
@@ -125,6 +132,17 @@ class UnitManager:
         written = self.install_files()
         for p in written:
             log.append(f"wrote {p}")
+        # Unit files are written above regardless — they're a prerequisite
+        # for any system that CAN run systemd. But if systemctl is absent
+        # (Docker container, macOS, WSL1), skip the daemon-reload/enable
+        # phase with a clear message rather than stacking cryptic "command
+        # not found" errors on top of each other.
+        if shutil.which("systemctl") is None:
+            log.append(
+                "systemctl not available — unit files written but not activated. "
+                "On a systemd-enabled host, re-run `getbased-stack install` to enable + start."
+            )
+            return log
         r = self.daemon_reload()
         if r.returncode != 0:
             log.append(f"daemon-reload FAILED: {r.stderr.strip()}")

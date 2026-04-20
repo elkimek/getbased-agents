@@ -331,6 +331,25 @@ def test_init_yes_installs_units_without_asking(stack_home, fake_shell, monkeypa
     assert (stack_home / "config" / "systemd" / "user" / "getbased-dashboard.service").exists()
 
 
+def test_init_yes_survives_missing_systemctl(stack_home, fake_shell, monkeypatch):
+    """--yes on a host without systemctl (Docker, macOS, WSL1) must NOT
+    crash with an unhandled FileNotFoundError. Unit files still land;
+    systemd ops are skipped with a clear message."""
+    import shutil as _shutil
+    monkeypatch.setattr(_shutil, "which", lambda name: None)
+    # Prompts still stubbed defensively — --yes shouldn't call them.
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
+
+    rc, out, _ = _run(["init", "--yes"])
+    assert rc == 0
+    # Unit files still written (for re-run on a systemd-enabled host)
+    assert (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()
+    # Graceful message, not a traceback
+    assert "systemctl not available" in out
+    assert "Traceback" not in out
+
+
 def test_init_yes_preserves_existing_token(stack_home, fake_shell, monkeypatch):
     """Non-interactive mode must not nuke a previously-saved token —
     it takes the 'keep current' default, same as pressing Enter."""

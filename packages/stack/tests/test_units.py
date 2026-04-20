@@ -164,6 +164,40 @@ def test_install_daemon_reload_failure_short_circuits(tmp_path):
     assert any("daemon-reload FAILED" in line for line in log)
 
 
+def test_real_shell_handles_missing_binary(monkeypatch):
+    """_real_shell must not raise FileNotFoundError when systemctl is
+    absent (Docker, macOS, WSL1). Before 0.5.1 this crashed `init` with
+    an unhandled traceback — check it returns a shell-like 127 instead."""
+    import subprocess as sp
+
+    def boom(*a, **kw):
+        raise FileNotFoundError(2, "No such file or directory", "systemctl")
+
+    monkeypatch.setattr(sp, "run", boom)
+    r = units._real_shell(["systemctl", "--user", "daemon-reload"])
+    assert r.returncode == 127
+    assert "command not found" in r.stderr
+    assert "systemctl" in r.stderr
+
+
+def test_install_skips_when_systemctl_absent(tmp_path, monkeypatch):
+    """On a host without systemctl, `install()` must write unit files
+    (harmless, enables later re-run) but skip daemon-reload/enable with
+    a clear message — not stack FAILED errors on top of each other."""
+    monkeypatch.setattr(units.shutil, "which", lambda name: None)
+    shell = FakeShell()
+    mgr = UnitManager(unit_dir=tmp_path, shell=shell)
+    log = mgr.install()
+
+    # Files written (prereq for future systemd-enabled reinstall)
+    for name in SERVICE_NAMES:
+        assert (tmp_path / name).exists()
+    # No systemctl calls attempted
+    assert not any(c[:1] == ["systemctl"] for c in shell.calls)
+    # User-visible message present
+    assert any("systemctl not available" in line for line in log)
+
+
 def test_install_enable_failure_reported(tmp_path):
     shell = FakeShell(
         {
