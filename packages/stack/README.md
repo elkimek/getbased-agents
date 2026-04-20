@@ -6,20 +6,33 @@ Part of the [getbased-agents monorepo](https://github.com/elkimek/getbased-agent
 
 ## Install
 
+Linux, one command:
+
+```bash
+curl -sSL https://getbased.health/install.sh | bash
+```
+
+Runs end-to-end: installs `getbased-agent-stack[full]` via whichever of `uv` or `pipx` is available, exposes sibling binaries, runs `getbased-stack init --yes`, and starts rag + dashboard as systemd user services. [Read the script first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious.
+
+Manual — pipx:
+
 ```bash
 pipx install --include-deps "getbased-agent-stack[full]"
 ```
 
 The `--include-deps` flag is required — it exposes `getbased-mcp`, `lens`, and `getbased-dashboard` alongside `getbased-stack` on your PATH. Without it, pipx only links the stack's own entry point and the MCP/rag/dashboard binaries stay hidden inside the venv.
 
-`uv` users: install each package as its own tool instead, since `uv tool` has no `--include-deps` equivalent yet:
+Manual — uv (0.11+):
 
 ```bash
-uv tool install getbased-mcp
-uv tool install "getbased-rag[full]"
-uv tool install getbased-dashboard
-uv tool install "getbased-agent-stack[full]"
+uv tool install \
+  --with-executables-from getbased-rag \
+  --with-executables-from getbased-dashboard \
+  --with-executables-from getbased-mcp \
+  "getbased-agent-stack[full]"
 ```
+
+`--with-executables-from` is uv's equivalent of pipx's `--include-deps` — one tool venv, all four binaries on PATH.
 
 Pulls:
 
@@ -33,16 +46,26 @@ Total install: ~500 MB (the ML deps dominate). Smaller installs available — `p
 
 ## Quickstart — one command
 
+Interactive wizard:
+
 ```bash
 getbased-stack init
 ```
 
+Non-interactive (for scripted installs and curl | bash; `install.sh` uses this):
+
+```bash
+getbased-stack init --yes
+```
+
 The wizard (~30 seconds):
 
-1. Prompts for your `GETBASED_TOKEN` (skip if you don't use sync)
+1. Prompts for your `GETBASED_TOKEN` (skip if you don't use sync; `--yes` skips)
 2. Generates a rag API key if one doesn't exist
 3. Writes `~/.config/getbased/env` (mode 0600) — the shared config file
 4. Installs systemd user units for rag + dashboard, enables them, starts them
+
+On non-systemd hosts (Docker, macOS, WSL1) step 4 writes the unit files but skips activation with a clear message instead of crashing — re-run on a systemd-enabled host or start `lens serve` + `getbased-dashboard serve` manually.
 
 Then paste one line into your MCP client:
 

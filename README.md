@@ -23,10 +23,26 @@ sync GW   getbased-rag  ◄──────────┘         getbased-mc
 
 ## Install
 
-Most users: **one command** via the meta-package:
+Linux, zero-friction — `curl | bash`:
 
 ```bash
-pipx install "getbased-agent-stack[full]"
+curl -sSL https://getbased.health/install.sh | bash
+```
+
+The script auto-detects `uv` or `pipx` (install either one first if you have neither), installs `getbased-agent-stack[full]` with sibling binaries exposed, runs `getbased-stack init --yes`, and starts `getbased-rag` + `getbased-dashboard` as systemd user services. [Read it first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious — `curl -sSL https://getbased.health/install.sh.sha256 | sha256sum -c` verifies the published hash.
+
+Manual install (macOS, Windows, WSL1, or if you'd rather not run a shell script):
+
+```bash
+# pipx — --include-deps exposes lens, getbased-dashboard, getbased-mcp on PATH
+pipx install --include-deps "getbased-agent-stack[full]"
+
+# or uv (0.11+)
+uv tool install \
+  --with-executables-from getbased-rag \
+  --with-executables-from getbased-dashboard \
+  --with-executables-from getbased-mcp \
+  "getbased-agent-stack[full]"
 ```
 
 Or pick the piece you actually need:
@@ -37,17 +53,17 @@ pipx install "getbased-rag[full]"    # RAG backend for the PWA, no agents (~500 
 pipx install getbased-dashboard      # web UI; pulls the MCP dep alongside it
 ```
 
-## Quickstart
+## Quickstart (manual)
 
 ```bash
 pipx install --include-deps "getbased-agent-stack[full]"
-getbased-stack init                        # wizard: token, API key, systemd units
+getbased-stack init --yes                  # non-interactive: token skipped, API key
+                                           # auto-generated, systemd units installed
+                                           # and started. Drop --yes for the wizard.
 getbased-stack mcp-config claude-desktop   # paste the snippet into your MCP client
 ```
 
-`--include-deps` exposes `getbased-mcp`, `lens`, and `getbased-dashboard` alongside `getbased-stack` on your PATH — without it, pipx hides the sibling binaries inside the venv.
-
-That's it — rag + dashboard are running as systemd user services; your MCP client has everything it needs. See [`packages/stack/README.md`](packages/stack/README.md) for the full flow including linger-for-headless and token rotation.
+`--include-deps` exposes `getbased-mcp`, `lens`, and `getbased-dashboard` alongside `getbased-stack` on your PATH — without it, pipx hides the sibling binaries inside the venv. See [`packages/stack/README.md`](packages/stack/README.md) for the full flow including linger-for-headless and token rotation.
 
 ## Development
 
