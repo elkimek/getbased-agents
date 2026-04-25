@@ -477,6 +477,31 @@ async def getbased_wearables_series(
             "spo2_avg": ["spo₂", "spo2"],
             "body_temp_delta": ["body temp", "body_temp"],
             "glucose_avg": ["glucose"],
+            # Withings full coverage (getbased PR #140 / #143). Labels are
+            # unsubbed for body comp, but sleep architecture carries subs
+            # like "Sleep total", "Sleep HR (avg) bpm", etc.
+            "pwv": ["pwv"],
+            "vascular_age": ["vascular age"],
+            "cardio_fitness": ["cardio fit"],
+            "body_fat_pct": ["body fat"],
+            "fat_mass_kg": ["fat mass"],
+            "muscle_mass_kg": ["muscle"],
+            "lean_mass_kg": ["lean mass"],
+            "bone_mass_kg": ["bone"],
+            "water_mass_kg": ["water"],
+            "visceral_fat": ["visceral fat"],
+            "nerve_health_score": ["nerve health"],
+            "body_temp": ["body temp"],
+            "skin_temp": ["skin temp"],
+            "sleep_total_min": ["sleep total"],
+            "sleep_deep_min": ["deep sleep"],
+            "sleep_light_min": ["light sleep"],
+            "sleep_rem_min": ["rem sleep"],
+            "sleep_awake_min": ["awake (in bed)", "awake in bed"],
+            "sleep_hr_avg": ["sleep hr (avg)", "sleep hr"],
+            "sleep_breathing_rate": ["breathing (sleep)", "breathing"],
+            "sleep_snoring_min": ["snoring"],
+            "sleep_breath_disturb": ["apnea (level)", "apnea"],
         }
         for alias_id, label_forms in aliases.items():
             if alias_id == metric_lower and any(lf in head for lf in label_forms):
