@@ -444,20 +444,39 @@ async def getbased_wearables_series(
         if metric_lower in head:
             matched.append(line)
             continue
-        # Common id → label aliases:
+        # Common id → label-fragment aliases. Browser emits labels via
+        # `${label}${unit ? ' ' + unit : ''} (${primarySource})` where
+        # `label` is `canon.label` followed by an optional `(${canon.sub})`.
+        # For `hrv_rmssd` that produces `HRV (🌙) ms (oura)` — the literal
+        # parens around the glyph mean substring matches like "hrv 🌙"
+        # FAIL. List enough fragments per id to handle all the label forms
+        # the canonical registry can emit.
         aliases = {
-            "hrv_rmssd": ["hrv (overnight)", "hrv overnight", "hrv 🌙"],
-            "hrv_day": ["hrv (daytime)", "hrv daytime", "hrv ☀"],
+            # HRV overnight: label="HRV", sub="🌙" → "hrv (🌙)"
+            "hrv_rmssd": ["hrv (🌙)", "hrv 🌙", "hrv (overnight)", "hrv overnight"],
+            # HRV daytime: label="HRV", sub="☀️" → "hrv (☀️)"
+            "hrv_day": ["hrv (☀", "hrv ☀", "hrv (daytime)", "hrv daytime"],
+            # HRV SDNN (Apple Health): label="HRV", sub="SDNN" → "hrv (sdnn)"
+            "hrv_sdnn": ["hrv (sdnn)", "hrv sdnn"],
+            # Resting HR: label="Resting HR", sub="" → "resting hr"
             "rhr": ["resting hr", "resting heart"],
-            "hr_day": ["heart rate (daytime)", "heart rate daytime"],
+            # Heart rate daytime: label="Heart rate", sub="☀️" → "heart rate (☀️)"
+            "hr_day": ["heart rate (☀", "heart rate ☀", "heart rate (daytime)", "heart rate daytime"],
+            # Sleep score: label="Sleep", sub="score" → "sleep (score)"
             "sleep_score": ["sleep (score)", "sleep score"],
             "readiness_score": ["readiness (score)", "readiness score"],
             "activity_score": ["activity (score)", "activity score"],
             "stress_high_min": ["stress"],
             "resilience_level": ["resilience"],
-            "cardio_age": ["cardio age", "cardio_age"],
-            "bp_systolic": ["bp syst", "bp_systolic"],
-            "bp_diastolic": ["bp dia", "bp_diastolic"],
+            "cardio_age": ["cardio age"],
+            "strain": ["strain (day)", "strain"],
+            "steps": ["steps"],
+            "weight": ["weight"],
+            "bp_systolic": ["bp (syst)", "bp syst", "blood pressure systolic"],
+            "bp_diastolic": ["bp (dia)", "bp dia", "blood pressure diastolic"],
+            "spo2_avg": ["spo₂", "spo2"],
+            "body_temp_delta": ["body temp", "body_temp"],
+            "glucose_avg": ["glucose"],
         }
         for alias_id, label_forms in aliases.items():
             if alias_id == metric_lower and any(lf in head for lf in label_forms):
