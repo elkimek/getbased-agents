@@ -6,22 +6,27 @@ with every subsequent request.
 We bind to 127.0.0.1 by default. Exposing the dashboard to a LAN means
 the same bearer is the only thing between anyone on that network and
 the user's knowledge base — override DASHBOARD_HOST=0.0.0.0 only if you
-know what you're doing.
+know what you are doing.
 """
 
 from __future__ import annotations
 
+import logging
 import platform as _platform
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__ as _PKG_VERSION
 from .config import DashboardConfig
+
+logger = logging.getLogger("getbased_dashboard")
 
 _WEB_DIR = Path(__file__).parent / "web"
 
@@ -52,10 +57,35 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     """Build a fresh FastAPI app. Tests pass a custom config; normal
     startup uses DashboardConfig.from_env()."""
     cfg = config or DashboardConfig.from_env()
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Startup: verify static files are reachable.
+        if not _WEB_DIR.exists():
+            logger.warning(
+                "web/ directory missing (%s) — dashboard UI will not load",
+                _WEB_DIR,
+            )
+        else:
+            index = _WEB_DIR / "index.html"
+            if not index.exists():
+                logger.warning(
+                    "index.html missing in %s — dashboard UI will not load",
+                    _WEB_DIR,
+                )
+            else:
+                logger.info(
+                    "Static UI mounted from %s (%d files)",
+                    _WEB_DIR,
+                    sum(1 for _ in _WEB_DIR.rglob("*") if _.is_file()),
+                )
+        yield
+
     app = FastAPI(
         title="getbased-dashboard",
         description="Web UI for getbased-agents.",
         version=_PKG_VERSION,
+        lifespan=_lifespan,
     )
     app.state.config = cfg
 
@@ -151,6 +181,20 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
             "api_key_file": str(cfg.api_key_file),
         }
 
+    @app.get("/api/health/ui")
+    async def health_ui() -> dict:
+        """Unauthenticated check: can the static mount actually serve files?
+        Returns the status of the web/ directory and whether index.html is
+        readable. Designed for liveness probes and cron health checks."""
+        web_ok = _WEB_DIR.exists() and (_WEB_DIR / "index.html").is_file()
+        return {
+            "ok": web_ok,
+            "web_dir": str(_WEB_DIR),
+            "files": sum(1 for _ in _WEB_DIR.rglob("*") if _.is_file())
+            if _WEB_DIR.exists()
+            else 0,
+        }
+
     # Register per-tab API routers. Imported here (inside the factory) so
     # the dashboard doesn't pay the import cost of, say, httpx+multipart
     # when a test builds a bare app to probe auth-only endpoints.
@@ -164,7 +208,9 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
 
     # Static UI — mount last so it doesn't shadow /api/*.
     if _WEB_DIR.exists():
-        app.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui")
+        app.mount(
+            "/", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui"
+        )
     else:
         # In dev installs from source the web/ dir may be empty. Fall
         # back to a placeholder so /api/* still works and the browser
