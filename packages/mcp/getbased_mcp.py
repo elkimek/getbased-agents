@@ -362,6 +362,123 @@ async def getbased_section(section: str = "", profile: str = "") -> str:
 
 
 @mcp.tool()
+@_instrumented("getbased_wearables_series")
+async def getbased_wearables_series(
+    metric: str = "",
+    days: int = 0,
+    profile: str = "",
+) -> str:
+    """Read the wearable daily-values series the user opted into pushing.
+
+    The user picks a window in Settings → Integrations → Agent Access:
+    7, 30, or 90 days (or off). When set, the browser pushes a
+    `[section:wearables-series-{N}d]` block to the gateway containing
+    one line per metric, daily values separated by `→` (oldest to
+    newest), `—` for no-reading days, and the primary source in parens.
+
+    This tool extracts that series and optionally slices it.
+
+    Args:
+        metric: optional metric id to return only one line. Examples:
+            'hrv_rmssd' (overnight HRV), 'rhr' (overnight resting HR),
+            'hr_day' (daytime HR), 'sleep_score', 'readiness_score',
+            'steps', 'weight'. Pass empty string for the whole matrix.
+        days: optional preferred window. If 0, returns whichever
+            window the user pushed. If 7/30/90, returns that section
+            specifically (404 if not pushed). The browser only pushes
+            ONE window at a time, so non-matching values fall back.
+        profile: profile id (omit for default).
+
+    Returns the section content, or a clear error if the user hasn't
+    enabled the toggle yet.
+    """
+    data = await _fetch_context(profile)
+    if "error" in data:
+        return f"Error: {data['error']}"
+    context = data.get("context", "")
+    if not context:
+        return "No context available"
+
+    sections = _parse_sections(context)
+    # Find the wearables-series-Nd section. Prefer requested `days`, else
+    # whichever the user opted into.
+    candidates = [k for k in sections if k.startswith("wearables-series-")]
+    if not candidates:
+        return (
+            "No wearable series available. The user can enable this in "
+            "getbased: Settings → Integrations → Agent Access → "
+            "'Push wearable daily series'. Pick 7, 30, or 90 days."
+        )
+
+    chosen = None
+    if days in (7, 30, 90):
+        target = f"wearables-series-{days}d"
+        chosen = next((k for k in candidates if k == target), None)
+        if not chosen:
+            available = [k.replace("wearables-series-", "").replace("d", "") for k in candidates]
+            return (
+                f"User hasn't pushed the {days}-day window. Currently "
+                f"available: {', '.join(available)} day(s). They can "
+                f"change the window in Settings → Integrations → Agent "
+                f"Access."
+            )
+    else:
+        chosen = candidates[0]
+
+    content = sections[chosen]
+    if not metric:
+        return f"[{chosen}]\n\n{content}"
+
+    # Parse one line. Lines look like:
+    #   HRV (overnight) ms (oura): 33→35→32→…→39
+    metric_lower = metric.lower().strip()
+    matched = []
+    for line in content.split("\n"):
+        if not line or line.startswith("##"):
+            continue
+        # The metric id isn't directly in the line — labels are like
+        # "HRV (overnight)" / "Resting HR" / "Steps". Match by checking
+        # whether `metric_lower` appears in the line label OR the line
+        # starts with a known label-form for that metric.
+        head = line.split(":", 1)[0].lower()
+        if metric_lower in head:
+            matched.append(line)
+            continue
+        # Common id → label aliases:
+        aliases = {
+            "hrv_rmssd": ["hrv (overnight)", "hrv overnight", "hrv 🌙"],
+            "hrv_day": ["hrv (daytime)", "hrv daytime", "hrv ☀"],
+            "rhr": ["resting hr", "resting heart"],
+            "hr_day": ["heart rate (daytime)", "heart rate daytime"],
+            "sleep_score": ["sleep (score)", "sleep score"],
+            "readiness_score": ["readiness (score)", "readiness score"],
+            "activity_score": ["activity (score)", "activity score"],
+            "stress_high_min": ["stress"],
+            "resilience_level": ["resilience"],
+            "cardio_age": ["cardio age", "cardio_age"],
+            "bp_systolic": ["bp syst", "bp_systolic"],
+            "bp_diastolic": ["bp dia", "bp_diastolic"],
+        }
+        for alias_id, label_forms in aliases.items():
+            if alias_id == metric_lower and any(lf in head for lf in label_forms):
+                matched.append(line)
+                break
+
+    if not matched:
+        # Surface the available metric labels so the agent can retry.
+        labels = []
+        for line in content.split("\n"):
+            if line and not line.startswith("##") and ":" in line:
+                labels.append(line.split(":", 1)[0].strip())
+        return (
+            f"Metric '{metric}' not found in [{chosen}]. "
+            f"Available labels: {' · '.join(labels)}"
+        )
+
+    return f"[{chosen}: {metric}]\n\n" + "\n".join(matched)
+
+
+@mcp.tool()
 @_instrumented("getbased_list_profiles")
 async def getbased_list_profiles() -> str:
     """List all available profiles in getbased."""
