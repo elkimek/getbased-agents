@@ -362,6 +362,167 @@ async def getbased_section(section: str = "", profile: str = "") -> str:
 
 
 @mcp.tool()
+@_instrumented("getbased_wearables_series")
+async def getbased_wearables_series(
+    metric: str = "",
+    days: int = 0,
+    profile: str = "",
+) -> str:
+    """Read the wearable daily-values series the user opted into pushing.
+
+    The user picks a window in Settings → Integrations → Agent Access:
+    7, 30, or 90 days (or off). When set, the browser pushes a
+    `[section:wearables-series-{N}d]` block to the gateway containing
+    one line per metric, daily values separated by `→` (oldest to
+    newest), `—` for no-reading days, and the primary source in parens.
+
+    This tool extracts that series and optionally slices it.
+
+    Args:
+        metric: optional metric id to return only one line. Examples:
+            'hrv_rmssd' (overnight HRV), 'rhr' (overnight resting HR),
+            'hr_day' (daytime HR), 'sleep_score', 'readiness_score',
+            'steps', 'weight'. Pass empty string for the whole matrix.
+        days: optional preferred window. If 0, returns whichever
+            window the user pushed. If 7/30/90, returns that section
+            specifically (404 if not pushed). The browser only pushes
+            ONE window at a time, so non-matching values fall back.
+        profile: profile id (omit for default).
+
+    Returns the section content, or a clear error if the user hasn't
+    enabled the toggle yet.
+    """
+    data = await _fetch_context(profile)
+    if "error" in data:
+        return f"Error: {data['error']}"
+    context = data.get("context", "")
+    if not context:
+        return "No context available"
+
+    sections = _parse_sections(context)
+    # Find the wearables-series-Nd section. Prefer requested `days`, else
+    # whichever the user opted into.
+    candidates = [k for k in sections if k.startswith("wearables-series-")]
+    if not candidates:
+        return (
+            "No wearable series available. The user can enable this in "
+            "getbased: Settings → Integrations → Agent Access → "
+            "'Push wearable daily series'. Pick 7, 30, or 90 days."
+        )
+
+    chosen = None
+    if days in (7, 30, 90):
+        target = f"wearables-series-{days}d"
+        chosen = next((k for k in candidates if k == target), None)
+        if not chosen:
+            available = [k.replace("wearables-series-", "").replace("d", "") for k in candidates]
+            return (
+                f"User hasn't pushed the {days}-day window. Currently "
+                f"available: {', '.join(available)} day(s). They can "
+                f"change the window in Settings → Integrations → Agent "
+                f"Access."
+            )
+    else:
+        chosen = candidates[0]
+
+    content = sections[chosen]
+    if not metric:
+        return f"[{chosen}]\n\n{content}"
+
+    # Parse one line. Lines look like:
+    #   HRV (overnight) ms (oura): 33→35→32→…→39
+    metric_lower = metric.lower().strip()
+    matched = []
+    for line in content.split("\n"):
+        if not line or line.startswith("##"):
+            continue
+        # The metric id isn't directly in the line — labels are like
+        # "HRV (overnight)" / "Resting HR" / "Steps". Match by checking
+        # whether `metric_lower` appears in the line label OR the line
+        # starts with a known label-form for that metric.
+        head = line.split(":", 1)[0].lower()
+        if metric_lower in head:
+            matched.append(line)
+            continue
+        # Common id → label-fragment aliases. Browser emits labels via
+        # `${label}${unit ? ' ' + unit : ''} (${primarySource})` where
+        # `label` is `canon.label` followed by an optional `(${canon.sub})`.
+        # For `hrv_rmssd` that produces `HRV (🌙) ms (oura)` — the literal
+        # parens around the glyph mean substring matches like "hrv 🌙"
+        # FAIL. List enough fragments per id to handle all the label forms
+        # the canonical registry can emit.
+        aliases = {
+            # HRV overnight: label="HRV", sub="🌙" → "hrv (🌙)"
+            "hrv_rmssd": ["hrv (🌙)", "hrv 🌙", "hrv (overnight)", "hrv overnight"],
+            # HRV daytime: label="HRV", sub="☀️" → "hrv (☀️)"
+            "hrv_day": ["hrv (☀", "hrv ☀", "hrv (daytime)", "hrv daytime"],
+            # HRV SDNN (Apple Health): label="HRV", sub="SDNN" → "hrv (sdnn)"
+            "hrv_sdnn": ["hrv (sdnn)", "hrv sdnn"],
+            # Resting HR: label="Resting HR", sub="" → "resting hr"
+            "rhr": ["resting hr", "resting heart"],
+            # Heart rate daytime: label="Heart rate", sub="☀️" → "heart rate (☀️)"
+            "hr_day": ["heart rate (☀", "heart rate ☀", "heart rate (daytime)", "heart rate daytime"],
+            # Sleep score: label="Sleep", sub="score" → "sleep (score)"
+            "sleep_score": ["sleep (score)", "sleep score"],
+            "readiness_score": ["readiness (score)", "readiness score"],
+            "activity_score": ["activity (score)", "activity score"],
+            "stress_high_min": ["stress"],
+            "resilience_level": ["resilience"],
+            "cardio_age": ["cardio age"],
+            "strain": ["strain (day)", "strain"],
+            "steps": ["steps"],
+            "weight": ["weight"],
+            "bp_systolic": ["bp (syst)", "bp syst", "blood pressure systolic"],
+            "bp_diastolic": ["bp (dia)", "bp dia", "blood pressure diastolic"],
+            "spo2_avg": ["spo₂", "spo2"],
+            "body_temp_delta": ["body temp", "body_temp"],
+            "glucose_avg": ["glucose"],
+            # Withings full coverage (getbased PR #140 / #143). Labels are
+            # unsubbed for body comp, but sleep architecture carries subs
+            # like "Sleep total", "Sleep HR (avg) bpm", etc.
+            "pwv": ["pwv"],
+            "vascular_age": ["vascular age"],
+            "cardio_fitness": ["cardio fit"],
+            "body_fat_pct": ["body fat"],
+            "fat_mass_kg": ["fat mass"],
+            "muscle_mass_kg": ["muscle"],
+            "lean_mass_kg": ["lean mass"],
+            "bone_mass_kg": ["bone"],
+            "water_mass_kg": ["water"],
+            "visceral_fat": ["visceral fat"],
+            "nerve_health_score": ["nerve health"],
+            "body_temp": ["body temp"],
+            "skin_temp": ["skin temp"],
+            "sleep_total_min": ["sleep total"],
+            "sleep_deep_min": ["deep sleep"],
+            "sleep_light_min": ["light sleep"],
+            "sleep_rem_min": ["rem sleep"],
+            "sleep_awake_min": ["awake (in bed)", "awake in bed"],
+            "sleep_hr_avg": ["sleep hr (avg)", "sleep hr"],
+            "sleep_breathing_rate": ["breathing (sleep)", "breathing"],
+            "sleep_snoring_min": ["snoring"],
+            "sleep_breath_disturb": ["apnea (level)", "apnea"],
+        }
+        for alias_id, label_forms in aliases.items():
+            if alias_id == metric_lower and any(lf in head for lf in label_forms):
+                matched.append(line)
+                break
+
+    if not matched:
+        # Surface the available metric labels so the agent can retry.
+        labels = []
+        for line in content.split("\n"):
+            if line and not line.startswith("##") and ":" in line:
+                labels.append(line.split(":", 1)[0].strip())
+        return (
+            f"Metric '{metric}' not found in [{chosen}]. "
+            f"Available labels: {' · '.join(labels)}"
+        )
+
+    return f"[{chosen}: {metric}]\n\n" + "\n".join(matched)
+
+
+@mcp.tool()
 @_instrumented("getbased_list_profiles")
 async def getbased_list_profiles() -> str:
     """List all available profiles in getbased."""
