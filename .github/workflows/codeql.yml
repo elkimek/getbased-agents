@@ -1,0 +1,48 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly catch-up so newly-published rules surface against quiet weeks.
+    - cron: "31 6 * * 1"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended adds taint-flow + injection rules beyond the
+          # default set. Worth it for a stack that exposes admin HTTP
+          # endpoints (mcp/rag/dashboard) and shells out to subprocess.
+          queries: security-extended
+          # Skip vendored / generated paths — findings inside those would
+          # be upstream's to fix and would flood the security tab.
+          config: |
+            paths-ignore:
+              - "**/.venv/**"
+              - "**/node_modules/**"
+              - "**/__pycache__/**"
+              - "**/dist/**"
+              - "**/build/**"
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
