@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-agent-stack"
-version = "0.5.1"
+version = "0.5.2"
 description = "One-command install of the full getbased agent stack — getbased-mcp + getbased-rag + getbased-dashboard"
 readme = "README.md"
-license = "GPL-3.0-only"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.10"
 # Pulls every sibling package. Bump this meta when a sibling protocol
 # bump requires coordinated release.

@@ -120,4 +120,4 @@ journalctl --user -u getbased-dashboard | grep LOGIN-URL
 
 ## License
 
-GPL-3.0-only, matching the rest of the monorepo.
+AGPL-3.0-or-later, matching the rest of the monorepo.

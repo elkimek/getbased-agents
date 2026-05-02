@@ -50,4 +50,4 @@ If you add a new tool to `getbased-mcp`, the integration test should exercise it
 
 ## Licence
 
-GPL-3.0-only. Matches both siblings.
+AGPL-3.0-or-later. Matches both siblings.

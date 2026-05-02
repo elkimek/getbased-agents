@@ -110,4 +110,6 @@ PyPI package names stay the same — the merge is repo-layout only.
 
 ## Licence
 
-GPL-3.0-only, consistent across all four packages.
+AGPL-3.0-or-later, consistent across all four packages. See [LICENSE](LICENSE).
+
+If you run a modified version of any of these services on a network, AGPLv3 §13 requires you to offer your users the corresponding source.

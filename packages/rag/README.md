@@ -198,7 +198,7 @@ lens key              Print the API key (creates one if missing)
 
 ## License
 
-GPL-3.0-only.
+AGPL-3.0-or-later.
 
 ---
 
