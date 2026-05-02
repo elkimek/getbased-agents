@@ -67,4 +67,4 @@ When changing request/response shapes, bump the `version` field in the request m
 
 ## Licence
 
-GPL-3.0-only.
+AGPL-3.0-or-later.

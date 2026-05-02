@@ -158,4 +158,4 @@ The integration test (`tests/test_integration.py`) spins up `lens serve` in a su
 
 ## Licence
 
-GPL-3.0-only, matching the siblings.
+AGPL-3.0-or-later, matching the siblings.

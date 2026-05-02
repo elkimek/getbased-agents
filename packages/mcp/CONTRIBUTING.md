@@ -54,4 +54,4 @@ Drift between the two is the most common source of "it worked locally but not in
 
 ## Licence
 
-GPL-3.0-only.
+AGPL-3.0-or-later.

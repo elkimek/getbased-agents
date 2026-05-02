@@ -229,4 +229,4 @@ That's expected — they're independent. Blood work tools talk to the sync gatew
 
 ## License
 
-GPL-3.0
+AGPL-3.0-or-later
