@@ -12,12 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import platform
 import shutil
 import sys
 import time
 from typing import Literal
+
+log = logging.getLogger(__name__)
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 
@@ -312,7 +315,11 @@ async def _stdio_probe(cfg: DashboardConfig, timeout_s: float = 10.0) -> dict:
         except RuntimeError as e:
             return {"ok": False, "error": str(e)}
         except Exception as e:
-            return {"ok": False, "error": f"MCP probe failed: {type(e).__name__}: {e}"}
+            # Log full detail server-side for triage; return only the
+            # exception class to the dashboard. Stack-trace strings can leak
+            # filesystem layout / env state that doesn't belong in the response.
+            log.exception("MCP probe failed")
+            return {"ok": False, "error": f"MCP probe failed: {type(e).__name__}"}
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         server_info = (init_resp.get("result") or {}).get("serverInfo") or {}

@@ -12,9 +12,26 @@ authenticate its upstream call to rag.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import tempfile
 from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+# Library IDs are UUID-like slugs from the rag server. Validate to keep
+# user-controlled path components from doing path traversal or scheme
+# injection through f"{cfg.lens_url}/libraries/{library_id}".
+_LIBRARY_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _validate_library_id(library_id: str) -> str:
+    if not library_id or not _LIBRARY_ID_RE.match(library_id):
+        raise HTTPException(
+            status_code=400, detail="invalid library_id (allowed: a-z, 0-9, _, -)"
+        )
+    return library_id
 
 import httpx
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
@@ -99,18 +116,21 @@ def register(app: FastAPI) -> None:
 
     @router.post("/libraries/{library_id}/activate")
     async def activate_library(request: Request, library_id: str):
+        library_id = _validate_library_id(library_id)
         return await _proxy_json(
             request, "POST", f"/libraries/{library_id}/activate"
         )
 
     @router.patch("/libraries/{library_id}")
     async def rename_library(request: Request, library_id: str, body: dict):
+        library_id = _validate_library_id(library_id)
         return await _proxy_json(
             request, "PATCH", f"/libraries/{library_id}", json_body=body
         )
 
     @router.delete("/libraries/{library_id}")
     async def delete_library(request: Request, library_id: str):
+        library_id = _validate_library_id(library_id)
         return await _proxy_json(request, "DELETE", f"/libraries/{library_id}")
 
     @router.post("/search")
@@ -296,11 +316,13 @@ def register(app: FastAPI) -> None:
                             + "\n"
                         ).encode()
                     except httpx.RequestError as e:
+                        # Log detail server-side; return generic class to client.
+                        log.exception("ingest request failed")
                         yield (
                             json.dumps(
                                 {
                                     "event": "error",
-                                    "message": f"ingest request failed: {e}",
+                                    "message": f"ingest request failed: {type(e).__name__}",
                                 }
                             )
                             + "\n"

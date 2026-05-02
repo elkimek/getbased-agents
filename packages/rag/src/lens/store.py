@@ -197,7 +197,10 @@ class Store:
         try:
             self._client().delete_collection(self._collection)
         except Exception as e:  # noqa: BLE001
-            log.warning("drop collection %s failed: %s", self._collection, e)
+            # Sanitize collection name to prevent CRLF log-injection — the
+            # collection name comes from user-supplied library IDs.
+            safe_name = self._collection.replace("\r", " ").replace("\n", " ")[:128]
+            log.warning("drop collection %s failed: %s", safe_name, e)
 
     def list_sources(self) -> list[dict]:
         """Aggregate by source: returns [{source, chunks}, ...] sorted by source.
