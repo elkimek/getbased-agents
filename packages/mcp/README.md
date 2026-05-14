@@ -225,7 +225,7 @@ That's expected — they're independent. Blood work tools talk to the sync gatew
 
 ## Related projects
 
-- **[getbased](https://github.com/elkimek/get-based)** — the health dashboard. This MCP reads the same lab context the in-app AI chat uses, and queries the same Knowledge Source endpoint configured in Settings → AI → Custom Knowledge Source. The [endpoint contract](https://github.com/elkimek/get-based/blob/main/docs/guide/interpretive-lens.md#for-developers-endpoint-contract) is shared — one server backs both the app and this MCP.
+- **[getbased](https://github.com/elkimek/get-based)** — the health dashboard. This MCP reads the same lab context the in-app AI chat uses, and queries the same Knowledge Source endpoint configured in Settings → AI → Custom Knowledge Source. The [endpoint contract](https://github.com/elkimek/get-based/blob/main/dev-docs/lens-endpoint-contract.md) is shared — one server backs both the app and this MCP.
 
 ## License
 
