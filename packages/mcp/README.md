@@ -100,9 +100,9 @@ The gateway stores context per profile ID. To work with multiple profiles:
 
 ## Setup
 
-### 1. Enable messenger access in getbased
+### 1. Enable Agent Access in getbased
 
-Go to **Settings > Data > Messenger Access** and toggle it on. Copy the read-only token.
+Go to **Settings > Data > Agent Access** and toggle it on. Copy the read-only token.
 
 ### 2. Set up a RAG server (optional — for knowledge_search)
 
@@ -175,7 +175,7 @@ Ask about your labs in any connected conversation:
 
 | Variable | Required | Description |
 |---|---|---|
-| `GETBASED_TOKEN` | Yes | Read-only token from getbased Settings > Data > Messenger Access |
+| `GETBASED_TOKEN` | Yes | Read-only token from getbased Settings > Data > Agent Access |
 | `GETBASED_GATEWAY` | No | Context gateway URL (default: `https://sync.getbased.health`) |
 | `LENS_URL` | No | RAG server URL (default: `http://localhost:8322`). Overrides `LENS_PORT` |
 | `LENS_PORT` | No | RAG server port, only used to build default `LENS_URL` (default: `8322`) |
