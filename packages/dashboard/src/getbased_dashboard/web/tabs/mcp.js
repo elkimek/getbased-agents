@@ -70,7 +70,7 @@ export async function render(root) {
       <pre id="cfg-body" class="code-block">Loading…</pre>
       <p class="dim" style="margin-top: 8px; font-size: 12px;">
         The <code>GETBASED_TOKEN</code> placeholder needs your read-only token from
-        <em>getbased → Settings → Data → Messenger Access</em>. Everything else is filled in.
+        <em>getbased → Settings → Data → Agent Access</em>. Everything else is filled in.
       </p>
     </section>
 

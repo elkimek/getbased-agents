@@ -117,7 +117,7 @@ def _config_for_client(
     # Env block every client gets. Omit GETBASED_TOKEN — we don't have it,
     # and emitting a placeholder string would mislead. The UI explains.
     env_block = {
-        "GETBASED_TOKEN": "<paste from getbased → Settings → Data → Messenger Access>",
+        "GETBASED_TOKEN": "<paste from getbased → Settings → Data → Agent Access>",
         "LENS_URL": env_info["lens_url"],
         "LENS_API_KEY_FILE": env_info["lens_api_key_file"],
     }
