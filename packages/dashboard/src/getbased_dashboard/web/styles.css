@@ -85,7 +85,7 @@
   --ok: #22c55e;
   --warn: #f59e0b;
   --shadow: 0 20px 70px rgba(0, 0, 0, 0.42);
-  --glow: none;
+  --glow: 0 0 0 transparent;
   color-scheme: dark;
 }
 
