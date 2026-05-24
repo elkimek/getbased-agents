@@ -38,7 +38,7 @@
   --text-dim: #c59f94;
   --accent: var(--user-accent);
   --accent-soft: color-mix(in srgb, var(--user-accent) 20%, transparent);
-  --accent-strong: #ffd166;
+  --accent-strong: color-mix(in srgb, var(--user-accent) 72%, #ffd166);
   --danger: #ff5d7a;
   --ok: #7be495;
   --warn: #ffb547;
@@ -59,7 +59,7 @@
   --text-dim: #91a2bd;
   --accent: var(--user-accent);
   --accent-soft: color-mix(in srgb, var(--user-accent) 18%, transparent);
-  --accent-strong: #9ac7ff;
+  --accent-strong: color-mix(in srgb, var(--user-accent) 70%, #9ac7ff);
   --danger: #ff4e88;
   --ok: #5df2c2;
   --warn: #ffd166;
@@ -123,7 +123,7 @@
   --text-dim: #aeb8d5;
   --accent: var(--user-accent);
   --accent-soft: color-mix(in srgb, var(--user-accent) 20%, transparent);
-  --accent-strong: #f0ccff;
+  --accent-strong: color-mix(in srgb, var(--user-accent) 68%, #f0ccff);
   --danger: #ff6b9d;
   --ok: #66ffd9;
   --warn: #ffd166;
@@ -1233,7 +1233,7 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 99999;
+  z-index: 9000;
   background:
     radial-gradient(ellipse at center, transparent 0%, transparent 56%, rgba(0, 0, 0, 0.46) 100%),
     repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 0 1px, rgba(0, 0, 0, 0.18) 1px 3px, transparent 3px 5px),
