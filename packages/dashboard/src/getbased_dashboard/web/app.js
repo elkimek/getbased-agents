@@ -12,6 +12,10 @@
 
 const KEY_STORAGE = "gbd.key";
 const THEME_STORAGE = "gbd.theme";
+const ACCENT_STORAGE = "gbd.accent";
+
+const THEMES = ["cypher", "sunrise", "neuromancer", "minimal", "warm", "liquid"];
+const LEGACY_THEME_MAP = { dark: "cypher", light: "warm" };
 
 function storedKey() {
   return localStorage.getItem(KEY_STORAGE) || "";
@@ -46,20 +50,41 @@ function _captureKeyFromUrl() {
 }
 _captureKeyFromUrl();
 
-// Theme — restored on boot, toggled via header icon.
+// Theme — restored on boot, selected from identity themes plus a separate user accent.
+function _applyTheme(theme) {
+  const normalized = LEGACY_THEME_MAP[theme] || theme;
+  const next = THEMES.includes(normalized) ? normalized : "cypher";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem(THEME_STORAGE, next);
+  const select = document.getElementById("theme-select");
+  if (select) select.value = next;
+}
+
+function _applyAccent(value) {
+  const accent = /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#4fd1c5";
+  document.documentElement.style.setProperty("--user-accent", accent);
+  localStorage.setItem(ACCENT_STORAGE, accent);
+  const input = document.getElementById("accent-picker");
+  if (input) input.value = accent;
+}
+
 function _initTheme() {
-  const stored = localStorage.getItem(THEME_STORAGE);
-  if (stored === "light" || stored === "dark") {
-    document.documentElement.setAttribute("data-theme", stored);
-  }
+  _applyTheme(localStorage.getItem(THEME_STORAGE) || document.documentElement.getAttribute("data-theme") || "cypher");
+  _applyAccent(localStorage.getItem(ACCENT_STORAGE) || "#4fd1c5");
 }
 _initTheme();
 
-function _toggleTheme() {
-  const cur = document.documentElement.getAttribute("data-theme") || "dark";
-  const next = cur === "light" ? "dark" : "light";
-  document.documentElement.setAttribute("data-theme", next);
-  localStorage.setItem(THEME_STORAGE, next);
+function _wireThemeControls() {
+  const select = document.getElementById("theme-select");
+  const accent = document.getElementById("accent-picker");
+  if (select) {
+    select.value = document.documentElement.getAttribute("data-theme") || "cypher";
+    select.addEventListener("change", () => _applyTheme(select.value));
+  }
+  if (accent) {
+    accent.value = localStorage.getItem(ACCENT_STORAGE) || "#4fd1c5";
+    accent.addEventListener("input", () => _applyAccent(accent.value));
+  }
 }
 
 export async function authed(path, opts = {}) {
@@ -283,7 +308,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   _wireKeyVisibilityToggle();
   _wireAuthHelpCopy();
-  document.getElementById("theme-toggle")?.addEventListener("click", _toggleTheme);
+  _wireThemeControls();
   _wireKeyboardShortcuts();
 
   bootstrap();

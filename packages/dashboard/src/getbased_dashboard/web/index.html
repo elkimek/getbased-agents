@@ -1,33 +1,45 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="cypher">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>getbased-dashboard</title>
-  <link rel="stylesheet" href="/styles.css">
+  <title>getbased Agent Desk</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="alternate icon" href="/favicon.ico" sizes="32x32">
+  <link rel="apple-touch-icon" href="/favicon.png">
+  <link rel="stylesheet" href="/styles.css?v=cockpit1">
 </head>
 <body>
+  <div class="ambient" aria-hidden="true"></div>
   <header class="app-header">
     <div class="app-brand">
-      <h1>getbased</h1>
-      <div class="app-subtitle">Agent stack dashboard</div>
+      <div class="brand-mark" aria-hidden="true">gb</div>
+      <div>
+        <h1>getbased Agent Desk</h1>
+        <div class="app-subtitle">local RAG · MCP · agent telemetry</div>
+      </div>
     </div>
-    <nav class="tabs">
-      <button class="tab active" data-tab="knowledge" title="Manage knowledge libraries, ingest files, search">Knowledge</button>
-      <button class="tab" data-tab="mcp" title="Model Context Protocol — generate config to plug this server into Claude Code, Cursor, Hermes, OpenClaw, etc.">MCP</button>
-      <button class="tab" data-tab="activity" title="Live feed and per-tool stats for calls your agents make">Activity</button>
-    </nav>
+    <div class="header-mission" aria-hidden="true">
+      <span>Mode</span><strong>LOCAL / READ-ONLY</strong>
+      <span>Surface</span><strong>Lens + MCP</strong>
+    </div>
     <div class="app-header-trail">
       <span class="active-lib-chip" id="active-lib-chip" hidden></span>
-      <button
-        class="theme-toggle"
-        id="theme-toggle"
-        type="button"
-        title="Toggle theme"
-        aria-label="Toggle theme">
-        <span class="theme-icon-dark">☾</span>
-        <span class="theme-icon-light">☀</span>
-      </button>
+      <label class="theme-select-label" title="Theme identity">
+        <span>theme</span>
+        <select id="theme-select" class="theme-select" aria-label="Theme">
+          <option value="cypher">Cypherpunk</option>
+          <option value="sunrise">Synth sunrise</option>
+          <option value="neuromancer">Neuromancer</option>
+          <option value="minimal">Minimal dark</option>
+          <option value="warm">Warm light</option>
+          <option value="liquid">Glass / liquid</option>
+        </select>
+      </label>
+      <label class="accent-picker-label" title="Accent color">
+        <span>accent</span>
+        <input id="accent-picker" class="accent-picker" type="color" value="#4fd1c5" aria-label="Accent color">
+      </label>
       <a
         class="docs-link"
         id="docs-link"
@@ -49,7 +61,44 @@
     </div>
   </div>
 
-  <main id="app">
+  <div class="cockpit-shell">
+    <aside class="command-rail" aria-label="Dashboard sections">
+      <div class="rail-status">
+        <span class="rail-pulse" aria-hidden="true"></span>
+        <div><strong>Agent Desk</strong><span>local control</span></div>
+      </div>
+      <nav class="tabs">
+        <button class="tab rail-tab active" data-tab="knowledge" title="Manage knowledge libraries, ingest files, search">
+          <span class="rail-icon">◆</span><span>Knowledge</span><em>libraries + search</em>
+        </button>
+        <button class="tab rail-tab" data-tab="mcp" title="Model Context Protocol — generate config to plug this server into Claude Code, Cursor, Hermes, OpenClaw, etc.">
+          <span class="rail-icon">◇</span><span>MCP</span><em>client wiring</em>
+        </button>
+        <button class="tab rail-tab" data-tab="activity" title="Live feed and per-tool stats for calls your agents make">
+          <span class="rail-icon">◈</span><span>Activity</span><em>tool calls live</em>
+        </button>
+      </nav>
+      <div class="rail-note">
+        <span>NO CLOUD DRIFT</span>
+        <strong>your documents, your machine</strong>
+      </div>
+    </aside>
+
+    <div class="cockpit-stage">
+      <section class="hero-shell" aria-label="Dashboard overview">
+        <div class="hero-copy">
+          <div class="eyebrow">local sovereign agent stack</div>
+          <h2>Knowledge, MCP, and activity — one cockpit.</h2>
+          <p>See what the agent can read, how clients connect, and what tools are firing — without the enterprise dashboard sludge.</p>
+        </div>
+        <div class="hero-metrics" aria-hidden="true">
+          <div><span>RAG</span><strong>Lens</strong></div>
+          <div><span>MCP</span><strong>stdio</strong></div>
+          <div><span>FEED</span><strong>live</strong></div>
+        </div>
+      </section>
+
+      <main id="app">
     <section id="auth-gate" hidden>
       <h2>Sign in</h2>
       <p class="auth-lede">
@@ -90,7 +139,9 @@
     <section id="tab-knowledge" class="tab-panel" hidden></section>
     <section id="tab-mcp" class="tab-panel" hidden></section>
     <section id="tab-activity" class="tab-panel" hidden></section>
-  </main>
+      </main>
+    </div>
+  </div>
 
   <script type="module" src="/app.js"></script>
 </body>
