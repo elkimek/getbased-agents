@@ -170,6 +170,9 @@ def test_static_assets_served(client: TestClient) -> None:
     assert "Weatherbot-faithful correction pass" in r.text
     assert "grid-template-columns: 88px minmax(0, 1fr)" in r.text
     assert "body.crt-on::before" in r.text
+    assert "body.crt-max::before" in r.text
+    assert "prefers-reduced-motion: reduce" in r.text
+    assert "animation: none" in r.text
     assert ".rail-tab em { display: none; }" in r.text
     assert "@media (max-width: 980px)" in r.text
     assert "border-bottom: 1px solid var(--border-strong)" in r.text

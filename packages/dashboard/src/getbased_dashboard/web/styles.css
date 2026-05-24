@@ -2603,6 +2603,13 @@ body.crt-max::after {
   0% { background-position: 0 -220px, 0 0, 0 0; }
   100% { background-position: 0 100vh, 0 0, 0 0; }
 }
+@media (prefers-reduced-motion: reduce) {
+  body.crt-on::before,
+  body.crt-max::before {
+    animation: none;
+    background-position: 0 0, 0 0, 0 0;
+  }
+}
 
 .app-header {
   width: min(1680px, calc(100% - 28px));
