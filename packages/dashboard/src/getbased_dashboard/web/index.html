@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="cypher">
+<html lang="en" data-theme="midnight-classic" data-theme-graphics="midnight-classic">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -28,18 +28,13 @@
       <label class="theme-select-label" title="Theme identity">
         <span>theme</span>
         <select id="theme-select" class="theme-select" aria-label="Theme">
-          <option value="cypher">Cypherpunk</option>
-          <option value="sunrise">Synth sunrise</option>
-          <option value="neuromancer">Neuromancer</option>
-          <option value="minimal">Minimal dark</option>
-          <option value="warm">Warm light</option>
-          <option value="liquid">Glass / liquid</option>
+          <option value="midnight-classic">Midnight</option>
+          <option value="cypherpunk-terminal">Cypherpunk</option>
+          <option value="neuroterminal-brutalism">Neuroterminal</option>
+          <option value="synth-sunrise">Synth Sunrise</option>
         </select>
       </label>
-      <label class="accent-picker-label" title="Accent color">
-        <span>accent</span>
-        <input id="accent-picker" class="accent-picker" type="color" value="#4fd1c5" aria-label="Accent color">
-      </label>
+      <button id="crt-toggle" class="crt-toggle" type="button" aria-pressed="false">CRT</button>
       <a
         class="docs-link"
         id="docs-link"
@@ -88,8 +83,8 @@
       <section class="hero-shell" aria-label="Dashboard overview">
         <div class="hero-copy">
           <div class="eyebrow">AGENT SIGNAL DESK · LOCAL-FIRST CONTROL</div>
-          <h2>RUN THE AGENT STACK LIKE A BLACKSITE TERMINAL.</h2>
-          <p>Libraries, MCP wiring, and live tool telemetry in one dense cockpit — your docs stay local, your agents stay observable.</p>
+          <h2>LOCAL AGENT SIGNAL DESK.</h2>
+          <p>Libraries, MCP wiring, and live tool telemetry in one calm cockpit — your docs stay local, your agents stay observable.</p>
         </div>
         <div class="hero-metrics" aria-hidden="true">
           <div><span>RAG</span><strong>Lens</strong></div>

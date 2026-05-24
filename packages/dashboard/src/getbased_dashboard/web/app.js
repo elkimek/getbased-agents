@@ -11,11 +11,26 @@
  */
 
 const KEY_STORAGE = "gbd.key";
-const THEME_STORAGE = "gbd.theme";
+const THEME_STORAGE = "gbd.weatherbotTheme";
 const ACCENT_STORAGE = "gbd.accent";
+const CRT_STORAGE = "gbd.crt";
 
-const THEMES = ["cypher", "sunrise", "neuromancer", "minimal", "warm", "liquid"];
-const LEGACY_THEME_MAP = { dark: "cypher", light: "warm" };
+const THEMES = [
+  "cypherpunk-terminal",
+  "midnight-classic",
+  "neuroterminal-brutalism",
+  "synth-sunrise",
+];
+const LEGACY_THEME_MAP = {
+  cypher: "midnight-classic",
+  dark: "midnight-classic",
+  sunrise: "synth-sunrise",
+  neuromancer: "neuroterminal-brutalism",
+  minimal: "midnight-classic",
+  warm: "synth-sunrise",
+  light: "synth-sunrise",
+  liquid: "neuroterminal-brutalism",
+};
 
 function storedKey() {
   return localStorage.getItem(KEY_STORAGE) || "";
@@ -53,8 +68,9 @@ _captureKeyFromUrl();
 // Theme — restored on boot, selected from identity themes plus a separate user accent.
 function _applyTheme(theme) {
   const normalized = LEGACY_THEME_MAP[theme] || theme;
-  const next = THEMES.includes(normalized) ? normalized : "cypher";
+  const next = THEMES.includes(normalized) ? normalized : "midnight-classic";
   document.documentElement.setAttribute("data-theme", next);
+  document.documentElement.setAttribute("data-theme-graphics", next);
   localStorage.setItem(THEME_STORAGE, next);
   const select = document.getElementById("theme-select");
   if (select) select.value = next;
@@ -69,21 +85,44 @@ function _applyAccent(value) {
 }
 
 function _initTheme() {
-  _applyTheme(localStorage.getItem(THEME_STORAGE) || document.documentElement.getAttribute("data-theme") || "cypher");
+  _applyTheme(localStorage.getItem(THEME_STORAGE) || document.documentElement.getAttribute("data-theme") || "midnight-classic");
   _applyAccent(localStorage.getItem(ACCENT_STORAGE) || "#4fd1c5");
+  _applyCrt(localStorage.getItem(CRT_STORAGE) || "on");
 }
 _initTheme();
+
+function _applyCrt(mode) {
+  const next = mode === "max" ? "max" : mode === "off" ? "off" : "on";
+  document.body.classList.toggle("crt-on", next !== "off");
+  document.body.classList.toggle("crt-max", next === "max");
+  localStorage.setItem(CRT_STORAGE, next);
+  const btn = document.getElementById("crt-toggle");
+  if (btn) {
+    btn.classList.toggle("on", next === "on");
+    btn.classList.toggle("max", next === "max");
+    btn.textContent = next === "off" ? "CRT OFF" : next === "max" ? "CRT MAX" : "CRT ON";
+    btn.setAttribute("aria-pressed", next !== "off" ? "true" : "false");
+  }
+}
 
 function _wireThemeControls() {
   const select = document.getElementById("theme-select");
   const accent = document.getElementById("accent-picker");
+  const crt = document.getElementById("crt-toggle");
   if (select) {
-    select.value = document.documentElement.getAttribute("data-theme") || "cypher";
+    select.value = document.documentElement.getAttribute("data-theme") || "midnight-classic";
     select.addEventListener("change", () => _applyTheme(select.value));
   }
   if (accent) {
     accent.value = localStorage.getItem(ACCENT_STORAGE) || "#4fd1c5";
     accent.addEventListener("input", () => _applyAccent(accent.value));
+  }
+  if (crt) {
+    _applyCrt(localStorage.getItem(CRT_STORAGE) || "on");
+    crt.addEventListener("click", () => {
+      const current = localStorage.getItem(CRT_STORAGE) || "on";
+      _applyCrt(current === "on" ? "max" : current === "max" ? "off" : "on");
+    });
   }
 }
 
