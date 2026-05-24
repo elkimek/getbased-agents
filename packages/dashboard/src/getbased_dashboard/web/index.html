@@ -1,33 +1,44 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="midnight-classic" data-theme-graphics="midnight-classic">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>getbased-dashboard</title>
-  <link rel="stylesheet" href="/styles.css">
+  <title>getbased Agent Desk</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="alternate icon" href="/favicon.ico" sizes="32x32">
+  <link rel="apple-touch-icon" href="/favicon.png">
+  <link rel="stylesheet" href="/styles.css?v=signaldesk3">
 </head>
 <body>
+  <div class="ambient" aria-hidden="true"></div>
   <header class="app-header">
     <div class="app-brand">
-      <h1>getbased</h1>
-      <div class="app-subtitle">Agent stack dashboard</div>
+      <div class="brand-mark" aria-hidden="true">gb</div>
+      <div>
+        <h1>GETBASED AGENTS</h1>
+        <div class="app-subtitle">RAG / MCP · LOCAL SIGNAL DESK</div>
+      </div>
     </div>
-    <nav class="tabs">
-      <button class="tab active" data-tab="knowledge" title="Manage knowledge libraries, ingest files, search">Knowledge</button>
-      <button class="tab" data-tab="mcp" title="Model Context Protocol — generate config to plug this server into Claude Code, Cursor, Hermes, OpenClaw, etc.">MCP</button>
-      <button class="tab" data-tab="activity" title="Live feed and per-tool stats for calls your agents make">Activity</button>
-    </nav>
+    <div class="header-mission" aria-hidden="true">
+      <span>Mode</span><strong>LOCAL</strong>
+      <span>Surface</span><strong>LENS / MCP</strong>
+    </div>
     <div class="app-header-trail">
       <span class="active-lib-chip" id="active-lib-chip" hidden></span>
-      <button
-        class="theme-toggle"
-        id="theme-toggle"
-        type="button"
-        title="Toggle theme"
-        aria-label="Toggle theme">
-        <span class="theme-icon-dark">☾</span>
-        <span class="theme-icon-light">☀</span>
-      </button>
+      <label class="theme-select-label" title="Theme identity">
+        <span>theme</span>
+        <select id="theme-select" class="theme-select" aria-label="Theme">
+          <option value="midnight-classic">Midnight</option>
+          <option value="cypherpunk-terminal">Cypherpunk</option>
+          <option value="neuroterminal-brutalism">Neuroterminal</option>
+          <option value="synth-sunrise">Synth Sunrise</option>
+        </select>
+      </label>
+      <label class="accent-picker-label" title="Accent color">
+        <span>accent</span>
+        <input id="accent-picker" class="accent-picker" type="color" value="#58a6ff" aria-label="Accent color">
+      </label>
+      <button id="crt-toggle" class="crt-toggle" type="button" aria-pressed="false">CRT</button>
       <a
         class="docs-link"
         id="docs-link"
@@ -49,7 +60,44 @@
     </div>
   </div>
 
-  <main id="app">
+  <div class="cockpit-shell">
+    <aside class="command-rail" aria-label="Dashboard sections">
+      <div class="rail-status">
+        <span class="rail-pulse" aria-hidden="true"></span>
+        <div><strong>GB</strong><span>signal desk</span></div>
+      </div>
+      <nav class="tabs">
+        <button class="tab rail-tab active" data-tab="knowledge" title="Manage knowledge libraries, ingest files, search">
+          <span class="rail-icon">◆</span><span>RAG</span><em>libraries + search</em>
+        </button>
+        <button class="tab rail-tab" data-tab="mcp" title="Model Context Protocol — generate config to plug this server into Claude Code, Cursor, Hermes, OpenClaw, etc.">
+          <span class="rail-icon">◇</span><span>MCP</span><em>client wiring</em>
+        </button>
+        <button class="tab rail-tab" data-tab="activity" title="Live feed and per-tool stats for calls your agents make">
+          <span class="rail-icon">◈</span><span>AUDIT</span><em>tool calls live</em>
+        </button>
+      </nav>
+      <div class="rail-note">
+        <span>NO CLOUD DRIFT</span>
+        <strong>your documents, your machine</strong>
+      </div>
+    </aside>
+
+    <div class="cockpit-stage">
+      <section class="hero-shell" aria-label="Dashboard overview">
+        <div class="hero-copy">
+          <div class="eyebrow">AGENT SIGNAL DESK · LOCAL-FIRST CONTROL</div>
+          <h2>LOCAL AGENT SIGNAL DESK.</h2>
+          <p>Corpus radar, MCP uplinks, and live tool-call telemetry in one calm cockpit — your docs stay local, your agents stay observable.</p>
+        </div>
+        <div class="hero-metrics" aria-hidden="true">
+          <div><span>CORPUS</span><strong>Lens</strong></div>
+          <div><span>UPLINK</span><strong>MCP</strong></div>
+          <div><span>TAPE</span><strong>live</strong></div>
+        </div>
+      </section>
+
+      <main id="app">
     <section id="auth-gate" hidden>
       <h2>Sign in</h2>
       <p class="auth-lede">
@@ -90,7 +138,9 @@
     <section id="tab-knowledge" class="tab-panel" hidden></section>
     <section id="tab-mcp" class="tab-panel" hidden></section>
     <section id="tab-activity" class="tab-panel" hidden></section>
-  </main>
+      </main>
+    </div>
+  </div>
 
   <script type="module" src="/app.js"></script>
 </body>

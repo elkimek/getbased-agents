@@ -22,6 +22,12 @@ def key_file(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def clean_process_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests hermetic when the developer shell has real tokens loaded."""
+    monkeypatch.delenv("GETBASED_TOKEN", raising=False)
+
+
 @pytest.fixture
 def cfg(key_file: Path, tmp_path: Path) -> DashboardConfig:
     return DashboardConfig(
