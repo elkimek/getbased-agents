@@ -48,7 +48,7 @@ export async function render(root) {
   root.innerHTML = `
     <section class="panel">
       <div class="panel-head">
-        <h2>Environment</h2>
+        <h2>Runtime Env</h2>
         <button id="refresh-env" class="ghost">refresh</button>
       </div>
       <div id="env-body" class="kv-grid"><p class="dim">Loading…</p></div>
@@ -56,7 +56,7 @@ export async function render(root) {
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Client config</h2>
+        <h2>Client Uplink</h2>
         <div class="inline-form">
           <label>client
             <select id="client-picker">
@@ -76,10 +76,10 @@ export async function render(root) {
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Test MCP</h2>
+        <h2>MCP Probe</h2>
         <button id="run-test">run test</button>
       </div>
-      <div id="test-body"><p class="dim">Spawns the MCP subprocess, runs <code>tools/list</code>, reports what came back. Verifies your install end-to-end.</p></div>
+      <div id="test-body"><p class="dim">Spawns the MCP subprocess, runs <code>tools/list</code>, and reports the return signal. Verifies the uplink end-to-end.</p></div>
     </section>
   `;
 

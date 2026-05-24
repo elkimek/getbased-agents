@@ -58,10 +58,10 @@ async function load(root) {
 
     const topStats = `
       <div class="stat-cards">
-        <div class="stat-card"><div class="stat-v">${stats.total_calls}</div><div class="stat-l">total calls</div></div>
-        <div class="stat-card"><div class="stat-v">${stats.total_errors}</div><div class="stat-l">errors</div></div>
-        <div class="stat-card"><div class="stat-v">${fmtRate(stats.overall_error_rate)}</div><div class="stat-l">error rate</div></div>
-        <div class="stat-card" title="Number of distinct MCP tools that have been called at least once."><div class="stat-v">${stats.tools.length}</div><div class="stat-l">tools called</div></div>
+        <div class="stat-card"><div class="stat-v">${stats.total_calls}</div><div class="stat-l">calls scanned</div></div>
+        <div class="stat-card"><div class="stat-v">${stats.total_errors}</div><div class="stat-l">faults</div></div>
+        <div class="stat-card"><div class="stat-v">${fmtRate(stats.overall_error_rate)}</div><div class="stat-l">fault rate</div></div>
+        <div class="stat-card" title="Number of distinct MCP tools that have been called at least once."><div class="stat-v">${stats.tools.length}</div><div class="stat-l">tools online</div></div>
       </div>
     `;
 
@@ -69,7 +69,7 @@ async function load(root) {
       ? `
         <table class="tool-stats">
           <thead><tr>
-            <th>Tool</th><th>Calls</th><th>Errors</th><th>Error rate</th><th>P50</th><th>P95</th>
+            <th>Tool</th><th>Calls</th><th>Faults</th><th>Fault rate</th><th>P50</th><th>P95</th>
           </tr></thead>
           <tbody>
             ${stats.tools
@@ -107,15 +107,15 @@ async function load(root) {
     root.innerHTML = `
       <section class="panel">
         <div class="panel-head">
-          <h2>Usage</h2>
-          <div class="panel-sub">Log: <code>${esc(data.log_path)}</code> · <button id="clear-log" class="ghost danger">clear log</button></div>
+          <h2>Signal Health</h2>
+          <div class="panel-sub">Tape: <code>${esc(data.log_path)}</code> · <button id="clear-log" class="ghost danger">clear tape</button></div>
         </div>
         ${topStats}
         ${perTool}
       </section>
 
       <section class="panel">
-        <div class="panel-head"><h2>Recent calls</h2><div class="panel-sub">newest first · auto-refresh every 10s</div></div>
+        <div class="panel-head"><h2>Live Call Tape</h2><div class="panel-sub">newest first · sweeps every 10s</div></div>
         ${feed}
       </section>
     `;

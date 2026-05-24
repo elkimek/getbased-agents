@@ -156,6 +156,9 @@ def test_index_html_served_at_root(client: TestClient) -> None:
     assert '<nav class="tabs">' in r.text
     assert "GETBASED AGENTS" in r.text
     assert "AGENT SIGNAL DESK" in r.text
+    assert "CORPUS" in r.text
+    assert "UPLINK" in r.text
+    assert "TAPE" in r.text
     assert 'id="crt-toggle"' in r.text
     assert 'id="accent-picker"' in r.text
     assert 'type="color"' in r.text

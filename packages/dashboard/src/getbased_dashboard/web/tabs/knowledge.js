@@ -35,7 +35,7 @@ function _ensurePill() {
   el.className = "ingest-pill";
   el.innerHTML = `
     <div class="pill-head">
-      <span class="pill-title">Indexing knowledge base</span>
+      <span class="pill-title">Indexing corpus signal</span>
       <button class="pill-dismiss" type="button" title="Hide (ingest keeps running)" aria-label="Hide">×</button>
     </div>
     <div class="pill-status">Preparing…</div>
@@ -359,8 +359,8 @@ function renderEngineBadge() {
 
   return `
     <div class="engine-strip" title="${esc(model)}">
-      <span class="engine-cell"><span class="engine-k">engine</span> <strong>${esc(engineLabel)}</strong></span>
-      <span class="engine-cell"><span class="engine-k">model</span> <strong>${esc(modelShort)}</strong></span>
+      <span class="engine-cell"><span class="engine-k">vector engine</span> <strong>${esc(engineLabel)}</strong></span>
+      <span class="engine-cell"><span class="engine-k">embed model</span> <strong>${esc(modelShort)}</strong></span>
       ${loadedCell}
       ${advancedBlock}
     </div>
@@ -458,14 +458,14 @@ function renderLibraries(root) {
     ? `
       <section class="panel onboarding-card">
         <div class="onboarding-head">
-          <h2>Welcome — let's get your first library going</h2>
-          <p class="dim">Three quick steps. You'll be searching your own documents in under a minute.</p>
+          <h2>Signal desk cold start</h2>
+          <p class="dim">Three quick steps. Build a local corpus, index it, then wire agents into the feed.</p>
         </div>
         <ol class="onboarding-steps">
           <li>
             <div class="step-num">1</div>
             <div>
-              <strong>Name your first library.</strong>
+              <strong>Name your first corpus.</strong>
               Pick something descriptive — <em>Research papers</em>, <em>Clinical notes</em>, <em>Nutrition</em>.
               The model you choose here is locked in for that library's lifetime.
             </div>
@@ -473,14 +473,14 @@ function renderLibraries(root) {
           <li>
             <div class="step-num">2</div>
             <div>
-              <strong>Drop files in.</strong>
+              <strong>Feed the radar.</strong>
               PDFs, Markdown, text, and docx are all supported, plus zip archives containing those.
             </div>
           </li>
           <li>
             <div class="step-num">3</div>
             <div>
-              <strong>Connect an agent.</strong>
+              <strong>Open the uplink.</strong>
               Hop over to the <button type="button" class="link" data-link-tab="mcp">MCP tab</button>, pick your client, copy the config.
             </div>
           </li>
@@ -508,20 +508,20 @@ function renderLibraries(root) {
     ${onboardingCard}
     <section class="panel">
       <div class="panel-head">
-        <h2>Libraries</h2>
+        <h2>Corpus Radar</h2>
         <form id="create-lib" class="inline-form">
           <input name="name" placeholder="New library name" required />
           ${modelPicker}
           <button type="submit">Create</button>
         </form>
       </div>
-      <p class="panel-sub" style="margin: -4px 0 12px">Each library is locked to its embedding model at creation — vectors are tied to that model's format and libraries can't be migrated later.</p>
+      <p class="panel-sub" style="margin: -4px 0 12px">Each corpus locks to its embedding model at creation — vectors are tied to that model's format and cannot drift later.</p>
       <ul class="lib-list">${rows || '<li class="empty">No libraries yet — use the form above to create one.</li>'}</ul>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Ingest</h2>
+        <h2>Index Intake</h2>
         <div class="panel-sub">${ingestSub}</div>
       </div>
       <div id="drop-zone" class="drop-zone ${!hasLibs || !activeLib ? "disabled" : ""}" ${!hasLibs || !activeLib ? "aria-disabled='true'" : ""}>
@@ -537,7 +537,7 @@ function renderLibraries(root) {
     </section>
 
     <section class="panel">
-      <div class="panel-head"><h2>Search</h2></div>
+      <div class="panel-head"><h2>Vector Search</h2></div>
       <form id="search-form" class="inline-form">
         <input name="query" placeholder="Ask your knowledge base…" required />
         <label>top k <input type="number" name="top_k" min="1" max="20" value="5" /></label>
@@ -553,7 +553,7 @@ function renderLibraries(root) {
           ? `<button id="clear-sources" class="ghost danger" type="button">Delete all</button>`
           : ""}
       </div>
-      <div class="stat-total">Total chunks: ${_stats.total_chunks}</div>
+      <div class="stat-total">Signal chunks: ${_stats.total_chunks}</div>
       <ul class="src-list">${sourceRows || '<li class="empty">No sources indexed yet — drop some files above.</li>'}</ul>
     </section>
   `;

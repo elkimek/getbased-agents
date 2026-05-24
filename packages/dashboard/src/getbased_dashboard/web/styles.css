@@ -2653,7 +2653,7 @@ body.crt-max::after {
   color: var(--text-dim);
   box-shadow: none;
 }
-.header-mission { min-width: 0; padding: 0.42rem 0.6rem; }
+.header-mission { min-width: 168px; padding: 0.42rem 0.7rem; grid-template-columns: auto minmax(64px, auto); }
 .header-mission::before,
 .header-mission::after { display: none; }
 .header-mission strong { color: var(--accent-strong); }
@@ -2803,9 +2803,29 @@ body.crt-max::after {
   backdrop-filter: none !important;
 }
 .panel { padding: 0.85rem 0.9rem; }
-.panel-head { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent); padding: 0.2rem 0 0.45rem; }
-.panel-head h2 { color: var(--text); font-size: 0.82rem; }
+.panel-head {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent);
+  padding: 0.2rem 0 0.45rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
+}
+.panel-head h2 {
+  color: var(--text);
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
 .panel-head h2::before { content: ""; }
+.panel-head h2::after {
+  content: "signal";
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  padding: 0.14rem 0.34rem;
+  font: 800 0.52rem/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 .stat-card { min-height: 132px; text-align: left; padding: 0.9rem; }
 .stat-card::before { display: block; height: 3px; background: var(--accent); }
 .stat-v { color: var(--accent); text-shadow: none !important; }
