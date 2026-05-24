@@ -151,7 +151,8 @@ def test_auth_reads_key_file_fresh_each_request(
 def test_index_html_served_at_root(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
-    assert "getbased-dashboard" in r.text
+    assert "<title>getbased Agent Desk</title>" in r.text
+    assert "getbased-dashboard login-url" in r.text
     assert '<nav class="tabs">' in r.text
     assert "GETBASED AGENTS" in r.text
     assert "AGENT SIGNAL DESK" in r.text
