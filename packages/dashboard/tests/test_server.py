@@ -156,6 +156,8 @@ def test_index_html_served_at_root(client: TestClient) -> None:
     assert "GETBASED AGENTS" in r.text
     assert "AGENT SIGNAL DESK" in r.text
     assert 'id="crt-toggle"' in r.text
+    assert 'id="accent-picker"' in r.text
+    assert 'type="color"' in r.text
     assert "midnight-classic" in r.text
     assert "neuroterminal-brutalism" in r.text
 
@@ -168,11 +170,16 @@ def test_static_assets_served(client: TestClient) -> None:
     assert "Weatherbot-faithful correction pass" in r.text
     assert "grid-template-columns: 88px minmax(0, 1fr)" in r.text
     assert "body.crt-on::before" in r.text
+    assert ".rail-tab em { display: none; }" in r.text
+    assert "@media (max-width: 980px)" in r.text
+    assert "border-bottom: 1px solid var(--border-strong)" in r.text
     assert "writing-mode: vertical-rl" in r.text
     r = client.get("/app.js")
     assert r.status_code == 200
     assert "bootstrap" in r.text
     assert "CRT_STORAGE" in r.text
+    assert "THEME_DEFAULT_ACCENTS" in r.text
+    assert "color-mix(in srgb, ${accent} 14%, transparent)" in r.text
 
 
 # ─── Key-file resolution with legacy fallback ──────────────────────────

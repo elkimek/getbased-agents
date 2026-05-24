@@ -2634,6 +2634,7 @@ body.crt-max::after {
 }
 .header-mission,
 .theme-select-label,
+.accent-picker-label,
 .crt-toggle,
 .status,
 .docs-link,
@@ -2712,7 +2713,8 @@ body.crt-max::after {
   display: grid;
   place-items: center;
 }
-.rail-tab .rail-icon { display: none; }
+.rail-tab .rail-icon,
+.rail-tab em { display: none; }
 .rail-tab span:not(.rail-icon) {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
@@ -2850,6 +2852,20 @@ select,
 }
 @media (max-width: 980px) {
   .cockpit-shell { grid-template-columns: 1fr; }
-  .command-rail { display: none; }
+  .command-rail {
+    display: block;
+    position: static;
+    height: auto;
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-strong);
+  }
+  .command-rail .tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .rail-tab { min-height: 52px; }
+  .rail-tab span:not(.rail-icon) {
+    writing-mode: horizontal-tb;
+    transform: none;
+  }
+  .rail-note { display: none; }
   .hero-shell { grid-template-columns: 1fr; }
 }

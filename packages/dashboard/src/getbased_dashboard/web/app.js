@@ -21,6 +21,12 @@ const THEMES = [
   "neuroterminal-brutalism",
   "synth-sunrise",
 ];
+const THEME_DEFAULT_ACCENTS = {
+  "midnight-classic": "#58a6ff",
+  "cypherpunk-terminal": "#f5b942",
+  "neuroterminal-brutalism": "#2ee6ff",
+  "synth-sunrise": "#ff6ad5",
+};
 const LEGACY_THEME_MAP = {
   cypher: "midnight-classic",
   dark: "midnight-classic",
@@ -76,17 +82,31 @@ function _applyTheme(theme) {
   if (select) select.value = next;
 }
 
-function _applyAccent(value) {
-  const accent = /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#4fd1c5";
-  document.documentElement.style.setProperty("--user-accent", accent);
-  localStorage.setItem(ACCENT_STORAGE, accent);
+function _themeDefaultAccent() {
+  const theme = document.documentElement.getAttribute("data-theme") || "midnight-classic";
+  return THEME_DEFAULT_ACCENTS[theme] || THEME_DEFAULT_ACCENTS["midnight-classic"];
+}
+
+function _syncAccentInput(value) {
   const input = document.getElementById("accent-picker");
-  if (input) input.value = accent;
+  if (input) input.value = value;
+}
+
+function _applyAccent(value) {
+  const accent = /^#[0-9a-f]{6}$/i.test(value || "") ? value : _themeDefaultAccent();
+  document.documentElement.style.setProperty("--user-accent", accent);
+  document.documentElement.style.setProperty("--accent", accent);
+  document.documentElement.style.setProperty("--accent-soft", `color-mix(in srgb, ${accent} 14%, transparent)`);
+  document.documentElement.style.setProperty("--accent-strong", `color-mix(in srgb, ${accent} 72%, white)`);
+  localStorage.setItem(ACCENT_STORAGE, accent);
+  _syncAccentInput(accent);
 }
 
 function _initTheme() {
   _applyTheme(localStorage.getItem(THEME_STORAGE) || document.documentElement.getAttribute("data-theme") || "midnight-classic");
-  _applyAccent(localStorage.getItem(ACCENT_STORAGE) || "#4fd1c5");
+  const storedAccent = localStorage.getItem(ACCENT_STORAGE);
+  if (storedAccent) _applyAccent(storedAccent);
+  else _syncAccentInput(_themeDefaultAccent());
   _applyCrt(localStorage.getItem(CRT_STORAGE) || "on");
 }
 _initTheme();
@@ -110,11 +130,13 @@ function _wireThemeControls() {
   const accent = document.getElementById("accent-picker");
   const crt = document.getElementById("crt-toggle");
   if (select) {
-    select.value = document.documentElement.getAttribute("data-theme") || "midnight-classic";
-    select.addEventListener("change", () => _applyTheme(select.value));
+    select.addEventListener("change", () => {
+      _applyTheme(select.value);
+      if (!localStorage.getItem(ACCENT_STORAGE)) _syncAccentInput(_themeDefaultAccent());
+    });
   }
   if (accent) {
-    accent.value = localStorage.getItem(ACCENT_STORAGE) || "#4fd1c5";
+    accent.value = localStorage.getItem(ACCENT_STORAGE) || _themeDefaultAccent();
     accent.addEventListener("input", () => _applyAccent(accent.value));
   }
   if (crt) {
