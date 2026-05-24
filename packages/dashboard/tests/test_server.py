@@ -173,6 +173,8 @@ def test_static_assets_served(client: TestClient) -> None:
     assert "--accent" in r.text
     assert "Weatherbot-faithful correction pass" in r.text
     assert "grid-template-columns: 88px minmax(0, 1fr)" in r.text
+    assert "width: 100%" in r.text
+    assert "@media (min-width: 1680px)" in r.text
     assert "body.crt-on::before" in r.text
     assert "body.crt-max::before" in r.text
     assert "prefers-reduced-motion: reduce" in r.text

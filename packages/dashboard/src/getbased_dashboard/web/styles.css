@@ -2612,9 +2612,9 @@ body.crt-max::after {
 }
 
 .app-header {
-  width: min(1680px, calc(100% - 28px));
-  margin: 14px auto 0;
-  padding: 0.75rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.75rem 1rem;
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
@@ -2677,10 +2677,13 @@ body.crt-max::after {
 }
 
 .cockpit-shell {
-  width: min(1680px, calc(100% - 28px));
-  margin: 0 auto 32px;
+  width: 100%;
+  margin: 0 0 32px;
   grid-template-columns: 88px minmax(0, 1fr);
   gap: 0;
+}
+.cockpit-stage {
+  padding: 0 1rem 1rem;
 }
 .command-rail {
   top: 0;
@@ -2877,8 +2880,26 @@ select,
   #tab-knowledge > .onboarding-card { grid-column: 1 / -1; }
   #tab-knowledge > .panel:nth-of-type(4) { grid-column: auto; }
 }
+@media (min-width: 1680px) {
+  .hero-shell { grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.5fr); }
+  #tab-knowledge {
+    grid-template-columns: minmax(360px, 0.85fr) minmax(480px, 1.05fr) minmax(420px, 1fr);
+  }
+  #tab-knowledge > .engine-strip,
+  #tab-knowledge > .onboarding-card { grid-column: 1 / -1; }
+  #tab-knowledge > .panel:nth-of-type(4) { grid-column: 1 / -1; }
+  #tab-mcp {
+    grid-template-columns: minmax(360px, 0.75fr) minmax(560px, 1.1fr) minmax(360px, 0.8fr);
+    align-items: start;
+  }
+  #tab-activity {
+    grid-template-columns: minmax(460px, 0.72fr) minmax(720px, 1.28fr);
+    align-items: start;
+  }
+}
 @media (max-width: 980px) {
   .cockpit-shell { grid-template-columns: 1fr; }
+  .cockpit-stage { padding: 0 0.5rem 0.75rem; }
   .command-rail {
     display: block;
     position: static;
