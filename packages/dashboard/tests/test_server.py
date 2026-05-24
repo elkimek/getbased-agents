@@ -153,6 +153,8 @@ def test_index_html_served_at_root(client: TestClient) -> None:
     assert r.status_code == 200
     assert "getbased-dashboard" in r.text
     assert '<nav class="tabs">' in r.text
+    assert "GETBASED AGENTS" in r.text
+    assert "AGENT SIGNAL DESK" in r.text
 
 
 def test_static_assets_served(client: TestClient) -> None:
@@ -160,6 +162,9 @@ def test_static_assets_served(client: TestClient) -> None:
     r = client.get("/styles.css")
     assert r.status_code == 200
     assert "--accent" in r.text
+    assert "Signal Desk parity pass" in r.text
+    assert "grid-template-columns: 64px minmax(0, 1fr)" in r.text
+    assert "writing-mode: vertical-rl" in r.text
     r = client.get("/app.js")
     assert r.status_code == 200
     assert "bootstrap" in r.text
