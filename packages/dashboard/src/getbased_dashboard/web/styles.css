@@ -2917,3 +2917,54 @@ select,
   .rail-note { display: none; }
   .hero-shell { grid-template-columns: 1fr; }
 }
+
+@media (max-width: 640px) {
+  .app-header {
+    align-items: flex-start;
+  }
+  .app-header-trail {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  .active-lib-chip {
+    order: 10;
+    flex: 1 0 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+  .header-mission {
+    display: none;
+  }
+  .hero-copy::before {
+    display: none;
+  }
+  .eyebrow {
+    display: block;
+    line-height: 1.35;
+  }
+  .hero-copy h2 {
+    font-size: clamp(1.45rem, 10vw, 2.25rem);
+    letter-spacing: -0.045em;
+  }
+  .lib-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+  .lib-meta,
+  .lib-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .lib-actions {
+    justify-content: flex-start;
+  }
+  .model-chip {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    margin: 0.35rem 0 0;
+    white-space: normal;
+  }
+}

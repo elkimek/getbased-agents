@@ -758,6 +758,6 @@ export async function render(root) {
     await refresh();
     renderLibraries(root);
   } catch (err) {
-    root.innerHTML = `<p class="err">Failed to load: ${err.message}</p>`;
+    root.innerHTML = `<p class="err">Failed to load: ${esc(err.message)}</p>`;
   }
 }
