@@ -108,6 +108,17 @@ class UnitManager:
         args.extend(SERVICE_NAMES)
         return self._shell(args)
 
+    def restart(self) -> CommandResult:
+        """Restart bundled services after an upgrade/reinstall.
+
+        `uv tool install` replaces files inside the tool environment. If the
+        services are already running, `systemctl enable --now …` is a no-op and
+        the old Python processes can keep serving from a half-replaced venv.
+        Restarting makes repeated `curl | bash` installs safe and starts the
+        units when they were previously inactive.
+        """
+        return self._shell(["systemctl", "--user", "restart", *SERVICE_NAMES])
+
     def disable(self, now: bool = True) -> CommandResult:
         args = ["systemctl", "--user", "disable"]
         if now:
@@ -154,7 +165,11 @@ class UnitManager:
             else:
                 log.append("enabled " + ", ".join(SERVICE_NAMES))
                 if start:
-                    log.append("started " + ", ".join(SERVICE_NAMES))
+                    r = self.restart()
+                    if r.returncode != 0:
+                        log.append(f"restart FAILED: {r.stderr.strip()}")
+                    else:
+                        log.append("restarted " + ", ".join(SERVICE_NAMES))
         return log
 
     def uninstall(self) -> "list[str]":

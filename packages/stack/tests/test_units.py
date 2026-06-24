@@ -145,11 +145,13 @@ def test_install_full_sequence(tmp_path):
     # systemctl called in the expected order
     assert shell.calls[0] == ["systemctl", "--user", "daemon-reload"]
     assert shell.calls[1] == ["systemctl", "--user", "enable", "--now", *SERVICE_NAMES]
+    assert shell.calls[2] == ["systemctl", "--user", "restart", *SERVICE_NAMES]
     # Log mentions what happened
     joined = "\n".join(log)
     assert "wrote" in joined
     assert "enabled" in joined
-    assert "started" in joined
+    assert "restarted" in joined
+    assert not any(line.startswith("started ") for line in log)
 
 
 def test_install_daemon_reload_failure_short_circuits(tmp_path):
