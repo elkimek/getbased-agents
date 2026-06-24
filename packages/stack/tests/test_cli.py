@@ -96,10 +96,14 @@ def test_install_writes_units_and_enables(stack_home, fake_shell):
     assert (unit_dir / "getbased-rag.service").exists()
     assert (unit_dir / "getbased-dashboard.service").exists()
 
-    # daemon-reload and enable --now both ran
+    # daemon-reload, enable --now, and restart all run. The explicit restart
+    # matters for re-running install.sh over an active stack after uv replaces
+    # the tool environment: old Python processes must not keep serving from a
+    # half-replaced venv.
     all_calls = [" ".join(cmd) for cmd in fake_shell]
     assert any("daemon-reload" in c for c in all_calls)
     assert any("enable --now" in c for c in all_calls)
+    assert any("restart getbased-rag.service getbased-dashboard.service" in c for c in all_calls)
 
 
 def test_install_no_enable_flag(stack_home, fake_shell):
