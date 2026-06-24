@@ -272,9 +272,11 @@ def _decrypt_agent_context(envelope: dict, profile_id: str) -> str:
 
     try:
         plaintext = AESGCM(raw_key).decrypt(iv, ciphertext, aad)
+        return plaintext.decode("utf-8")
     except InvalidTag as e:
         raise ValueError(failure) from e
-    return plaintext.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError("encrypted context decrypted to invalid UTF-8") from e
 
 
 def _decode_context_payload(data: dict) -> dict:
@@ -308,8 +310,12 @@ def _decode_context_payload(data: dict) -> dict:
     return data
 
 
-async def _fetch_context(profile: str = "") -> dict:
-    """Fetch formatted lab context from the getbased sync gateway."""
+async def _fetch_context(profile: str = "", *, decrypt_context: bool = True) -> dict:
+    """Fetch formatted lab context from the getbased sync gateway.
+
+    Profile discovery only needs token-authenticated metadata. Keep it usable
+    even on token-only installs by letting callers opt out of context decrypt.
+    """
     if not TOKEN:
         return {"error": "GETBASED_TOKEN not set"}
     try:
@@ -321,7 +327,8 @@ async def _fetch_context(profile: str = "") -> dict:
                 params=params,
             )
             r.raise_for_status()
-            return _decode_context_payload(r.json())
+            data = r.json()
+            return _decode_context_payload(data) if decrypt_context else data
     except httpx.HTTPStatusError as e:
         return {"error": f"getbased gateway returned {e.response.status_code}"}
     except httpx.RequestError as e:
@@ -656,7 +663,7 @@ async def getbased_wearables_series(
 @_instrumented("getbased_list_profiles")
 async def getbased_list_profiles() -> str:
     """List all available profiles in getbased."""
-    data = await _fetch_context()
+    data = await _fetch_context(decrypt_context=False)
     if "error" in data:
         return f"Error: {data['error']}"
     profiles = data.get("profiles") or []

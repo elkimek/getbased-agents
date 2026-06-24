@@ -95,6 +95,20 @@ async def test_getbased_list_profiles_no_token(gm, monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_getbased_list_profiles_works_without_context_key_for_encrypted_payload(gm, monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = _encrypted_context_payload(gm, "[section:hormones]\nsecret\n[/section:hormones]", profile_id="abc")
+    payload["profiles"] = [{"id": "abc", "name": "Main"}]
+    monkeypatch.setattr(gm, "AGENT_CONTEXT_KEY", "")
+    respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json=payload))
+
+    out = await gm.getbased_list_profiles()
+
+    assert "abc  Main" in out
+    assert "GETBASED_AGENT_CONTEXT_KEY" not in out
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_getbased_lab_context_happy(gm) -> None:
     respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json={
         "profileId": "abc",
@@ -146,6 +160,35 @@ async def test_getbased_lab_context_token_alone_cannot_decrypt_v2(gm, monkeypatc
 
     assert "Error:" in out
     assert "GETBASED_AGENT_CONTEXT_KEY not set" in out
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_lab_context_rejects_non_utf8_plaintext(gm) -> None:
+    import base64
+
+    profile_id = "abc"
+    raw_key = gm._decode_agent_context_key(gm.AGENT_CONTEXT_KEY)
+    iv = bytes(range(16, 28))
+    aad = gm.AGENT_CONTEXT_AAD_PREFIX + b":" + profile_id.encode("utf-8")
+    ciphertext = AESGCM(raw_key).encrypt(iv, b"\xff\xfe\xfd", aad)
+    payload = {
+        "profileId": profile_id,
+        "context": json.dumps({"encryptedContext": {
+            "version": 2,
+            "alg": "AES-256-GCM",
+            "keyDerivation": "raw-256-bit-key",
+            "keyId": gm._agent_context_key_id(raw_key),
+            "iv": base64.b64encode(iv).decode("ascii"),
+            "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+        }}),
+    }
+    respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json=payload))
+
+    out = await gm.getbased_lab_context()
+
+    assert "Error:" in out
+    assert "invalid UTF-8" in out
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ mcp_servers:
     command: getbased-mcp
     env:
       GETBASED_TOKEN: "paste-your-read-only-token-from-settings-agent-access-here"
+      GETBASED_AGENT_CONTEXT_KEY: "paste-your-context-encryption-key-from-settings-agent-access-here"
       GETBASED_GATEWAY: "https://sync.getbased.health"
       LENS_URL: "http://localhost:8322"
       LENS_API_KEY_FILE: "~/.local/share/getbased/lens/api_key"

@@ -87,8 +87,13 @@ async def _run(name: str, fn: Callable[[], Awaitable[str]], prereq_ok: bool, pre
 async def main() -> int:
     counters = {"pass": 0, "skip": 0, "fail": 0}
 
-    gateway_ok = bool(gm.TOKEN)
-    gateway_why = "GETBASED_TOKEN not set — skipping lab-context tools"
+    gateway_ok = bool(gm.TOKEN and gm.AGENT_CONTEXT_KEY)
+    if not gm.TOKEN:
+        gateway_why = "GETBASED_TOKEN not set — skipping lab-context tools"
+    elif not gm.AGENT_CONTEXT_KEY:
+        gateway_why = "GETBASED_AGENT_CONTEXT_KEY not set — skipping encrypted lab-context tools"
+    else:
+        gateway_why = ""
 
     lens_key = gm._read_lens_key()
     lens_ok = bool(lens_key)
