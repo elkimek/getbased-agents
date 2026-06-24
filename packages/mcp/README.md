@@ -9,11 +9,13 @@ An [MCP](https://modelcontextprotocol.io) server that exposes blood work data an
 ```
 getbased (browser)
   ├── your data, your mnemonic
-  ├── generates a read-only token
-  └── pushes lab context to sync gateway on every save
+  ├── generates a read-only relay token
+  ├── generates a separate Agent Context encryption key
+  ├── encrypts the rendered agent context with that context key
+  └── pushes ciphertext to sync gateway on every save
 
 Sync Gateway (sync.getbased.health/api/context)
-  └── stores context text behind token auth
+  └── stores encrypted context behind token auth; it cannot read the plaintext
 
 RAG Server (localhost, optional)
   ├── Vector database with embedded chunks
@@ -26,7 +28,7 @@ This MCP Server (on your machine)
   └── exposes everything as tools to any MCP client
 ```
 
-Your mnemonic never leaves your browser. The MCP server receives the same lab context text the getbased AI chat uses — not raw data.
+Your mnemonic never leaves your browser. The sync gateway receives only an end-to-end encrypted agent-context envelope; this MCP decrypts it locally with `GETBASED_AGENT_CONTEXT_KEY` and then exposes the same lab context text the getbased AI chat uses — not raw data. `GETBASED_TOKEN` is only the relay bearer token.
 
 ## Tools
 
@@ -102,7 +104,10 @@ The gateway stores context per profile ID. To work with multiple profiles:
 
 ### 1. Enable Agent Access in getbased
 
-Go to **Settings > Data > Agent Access** and toggle it on. Copy the read-only token.
+Go to **Settings > Data > Agent Access** and toggle it on. Copy both values:
+
+- **Read-only token** → `GETBASED_TOKEN` for relay authorization
+- **Context encryption key** → `GETBASED_AGENT_CONTEXT_KEY` for local decryption
 
 ### 2. Set up a RAG server (optional — for knowledge_search)
 
@@ -136,7 +141,8 @@ Add to your MCP config (`~/.claude/claude_desktop_config.json` or similar):
       "command": "python3",
       "args": ["/path/to/getbased_mcp.py"],
       "env": {
-        "GETBASED_TOKEN": "your-token-here"
+        "GETBASED_TOKEN": "your-token-here",
+        "GETBASED_AGENT_CONTEXT_KEY": "your-context-key-here"
       }
     }
   }
@@ -151,7 +157,7 @@ hermes mcp add getbased \
   --args /path/to/getbased_mcp.py
 ```
 
-Then set `GETBASED_TOKEN` in `~/.hermes/.env` or in the MCP server's `env` config in `config.yaml`:
+Then set `GETBASED_TOKEN` and `GETBASED_AGENT_CONTEXT_KEY` in `~/.hermes/.env` or in the MCP server's `env` config in `config.yaml`:
 
 ```yaml
 mcp_servers:
@@ -160,6 +166,7 @@ mcp_servers:
     args: [/path/to/getbased_mcp.py]
     env:
       GETBASED_TOKEN: your-token-here
+      GETBASED_AGENT_CONTEXT_KEY: your-context-key-here
 ```
 
 ### 4. Use it
@@ -175,7 +182,8 @@ Ask about your labs in any connected conversation:
 
 | Variable | Required | Description |
 |---|---|---|
-| `GETBASED_TOKEN` | Yes | Read-only token from getbased Settings > Data > Agent Access |
+| `GETBASED_TOKEN` | Yes | Read-only bearer token from getbased Settings > Data > Agent Access; authorizes fetches from the context gateway |
+| `GETBASED_AGENT_CONTEXT_KEY` | Yes for encrypted Agent Access payloads | Context encryption key from getbased Settings > Data > Agent Access; decrypts the relay payload locally in this MCP |
 | `GETBASED_GATEWAY` | No | Context gateway URL (default: `https://sync.getbased.health`) |
 | `LENS_URL` | No | RAG server URL (default: `http://localhost:8322`). Overrides `LENS_PORT` |
 | `LENS_PORT` | No | RAG server port, only used to build default `LENS_URL` (default: `8322`) |

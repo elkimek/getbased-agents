@@ -133,9 +133,10 @@ def emit_hermes(resolver: Callable[[str], "str | None"] = shutil.which) -> str:
     lines = [
         "# Hermes Agent MCP configuration snippet for ~/.hermes/config.yaml",
         "# See https://github.com/hermes-agent/hermes-agent for the full config schema.",
-        "# The getbased stack's shared env file carries GETBASED_TOKEN + rag URL +",
-        "# api key path; only the opt-in flag belongs in Hermes's config.",
-        "# (If your Hermes config already sets GETBASED_TOKEN / LENS_* explicitly,",
+        "# The getbased stack's shared env file carries GETBASED_TOKEN,",
+        "# GETBASED_AGENT_CONTEXT_KEY, rag URL, and api key path; only the",
+        "# opt-in flag belongs in Hermes's config.",
+        "# (If your Hermes config already sets GETBASED_TOKEN / GETBASED_AGENT_CONTEXT_KEY / LENS_* explicitly,",
         "# drop the env block entirely — the Python loader honors existing env.)",
     ]
     if warning:

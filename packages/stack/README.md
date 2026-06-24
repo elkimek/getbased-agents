@@ -60,7 +60,7 @@ getbased-stack init --yes
 
 The wizard (~30 seconds):
 
-1. Prompts for your `GETBASED_TOKEN` (skip if you don't use sync; `--yes` skips)
+1. Prompts for your `GETBASED_TOKEN` and `GETBASED_AGENT_CONTEXT_KEY` (skip if you don't use Agent Access; `--yes` keeps current values and lets you set them later with `getbased-stack set ...`)
 2. Generates a rag API key if one doesn't exist
 3. Writes `~/.config/getbased/env` (mode 0600) — the shared config file
 4. Installs systemd user units for rag + dashboard, enables them, starts them
@@ -103,7 +103,8 @@ sudo loginctl enable-linger $USER
 
 ```bash
 getbased-stack status          # env file, unit state, linger
-getbased-stack set GETBASED_TOKEN=new   # rotate the token
+getbased-stack set GETBASED_TOKEN=new
+getbased-stack set GETBASED_AGENT_CONTEXT_KEY=new
 getbased-stack install         # re-apply unit files after package upgrade
 getbased-stack uninstall       # stop + disable + remove units
 ```
@@ -130,7 +131,7 @@ sync GW   getbased-rag  ◀──────────────┘       g
 
 The MCP holds no persistent state; it's a thin translator between MCP tool calls and two HTTP backends:
 
-- `sync.getbased.health/api/context` — read-only lab summary pushed by your PWA session (via Agent Access token)
+- `sync.getbased.health/api/context` — encrypted lab context pushed by your PWA session (authorized by Agent Access token, decrypted locally with Agent Context key)
 - `localhost:8322` (getbased-rag) — your local research library
 
 The dashboard is likewise stateless — it proxies rag for Knowledge operations, imports `getbased_mcp` to introspect env/config, and spawns the MCP binary on demand to verify it works.

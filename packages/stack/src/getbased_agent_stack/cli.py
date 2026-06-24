@@ -100,18 +100,26 @@ def cmd_init(args: argparse.Namespace) -> int:
     )
     print()
 
-    # 1. token (optional)
+    # 1. Agent Access secrets (optional)
     existing = env_file.read_env_file()
     current_token = existing.get("GETBASED_TOKEN", "")
+    current_context_key = existing.get("GETBASED_AGENT_CONTEXT_KEY", "")
     masked = "****" + current_token[-4:] if current_token else "(unset)"
-    print(f"[1/4] getbased sync token (current: {masked})")
+    key_masked = "****" + current_context_key[-4:] if current_context_key else "(unset)"
+    print(f"[1/4] Agent Access token + context key (token: {masked}, key: {key_masked})")
     if non_interactive:
         token = current_token
-        print("  keeping current value (set with `getbased-stack set GETBASED_TOKEN=…` later).")
+        context_key = current_context_key
+        print("  keeping current values (set with `getbased-stack set GETBASED_TOKEN=…` and `getbased-stack set GETBASED_AGENT_CONTEXT_KEY=…` later).")
     else:
         token = _prompt(
             "Paste GETBASED_TOKEN (press Enter to keep current / skip)",
             default=current_token,
+            secret=True,
+        )
+        context_key = _prompt(
+            "Paste GETBASED_AGENT_CONTEXT_KEY (press Enter to keep current / skip)",
+            default=current_context_key,
             secret=True,
         )
 
@@ -131,6 +139,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     merged["GETBASED_STACK_MANAGED"] = "1"
     if token:
         merged["GETBASED_TOKEN"] = token
+    if context_key:
+        merged["GETBASED_AGENT_CONTEXT_KEY"] = context_key
     merged["LENS_API_KEY_FILE"] = str(key_path)
     merged.setdefault("LENS_URL", "http://127.0.0.1:8322")
     path = env_file.write_env_file(merged)
@@ -153,6 +163,14 @@ def cmd_init(args: argparse.Namespace) -> int:
     _print_linger_hint(strict=False)
 
     # 6. MCP config pointers
+    print("\nNext steps for Agent Access:")
+    print("  1. In getbased, enable Cross-device Sync and Agent Access.")
+    print("  2. Copy both values from Settings → Agent Access:")
+    print("     GETBASED_TOKEN and GETBASED_AGENT_CONTEXT_KEY.")
+    print("  3. Save them here with:")
+    print("     getbased-stack set GETBASED_TOKEN=...")
+    print("     getbased-stack set GETBASED_AGENT_CONTEXT_KEY=...")
+
     print("\nConfigure your MCP client(s):")
     for client in mcp_configs.SUPPORTED_CLIENTS:
         print(f"  getbased-stack mcp-config {client}")

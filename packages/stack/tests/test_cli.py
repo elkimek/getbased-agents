@@ -313,6 +313,8 @@ def test_init_yes_flag_skips_all_prompts(stack_home, fake_shell, monkeypatch):
     assert rc == 0
     # Banner reflects the mode so the user sees what happened
     assert "non-interactive" in out.lower()
+    assert "GETBASED_TOKEN and GETBASED_AGENT_CONTEXT_KEY" in out
+    assert "getbased-stack set GETBASED_AGENT_CONTEXT_KEY" in out
     # Env file + units still land
     assert env_file.env_file_path().exists()
     assert (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()

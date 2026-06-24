@@ -2,7 +2,7 @@
 """getbased MCP server — exposes blood work data and knowledge base search as tools.
 
 Architecture:
-  getbased (browser) → sync gateway → this MCP → your AI client
+  getbased (browser encrypts context) → sync gateway → this MCP decrypts → AI client
                                           ↕
                                     Lens RAG server (Qdrant + BGE-M3)
 
@@ -11,7 +11,10 @@ Knowledge base queries go through the Lens RAG server (separate process).
 No models are loaded in this process — everything is HTTP.
 """
 
+import base64
+import binascii
 import functools
+import hashlib
 import json
 import logging
 import os
@@ -19,6 +22,10 @@ import re
 import time
 
 import httpx
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from mcp.server.fastmcp import FastMCP
 
 
@@ -63,7 +70,10 @@ mcp = FastMCP("getbased")
 
 # ── Config ───────────────────────────────────────────────────────────
 TOKEN = os.environ.get("GETBASED_TOKEN", "")
+AGENT_CONTEXT_KEY = os.environ.get("GETBASED_AGENT_CONTEXT_KEY", "")
 GATEWAY = os.environ.get("GETBASED_GATEWAY", "https://sync.getbased.health")
+AGENT_CONTEXT_V1_KDF_INFO = b"getbased-agent-access-context-v1"
+AGENT_CONTEXT_AAD_PREFIX = b"getbased-agent-context-v2"
 
 LENS_URL = os.environ.get("LENS_URL", f"http://localhost:{os.environ.get('LENS_PORT', '8322')}")
 
@@ -178,8 +188,134 @@ def _instrumented(label: str):
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-async def _fetch_context(profile: str = "") -> dict:
-    """Fetch formatted lab context from the getbased sync gateway."""
+def _token_bytes(token: str) -> bytes:
+    token = (token or "").strip()
+    if re.fullmatch(r"[0-9a-fA-F]{64}", token):
+        try:
+            return bytes.fromhex(token)
+        except ValueError:
+            pass
+    return token.encode("utf-8")
+
+
+def _decode_agent_context_key(value: str) -> bytes:
+    key = (value or "").strip()
+    if not key:
+        raise ValueError("GETBASED_AGENT_CONTEXT_KEY not set")
+    if key.startswith("gbctx_v1_"):
+        key = key[len("gbctx_v1_"):]
+    padded = key + "=" * (-len(key) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+    except (binascii.Error, UnicodeEncodeError) as e:
+        raise ValueError("GETBASED_AGENT_CONTEXT_KEY is not valid base64url") from e
+    if len(raw) != 32:
+        raise ValueError("GETBASED_AGENT_CONTEXT_KEY must decode to 32 bytes")
+    return raw
+
+
+def _agent_context_key_id(raw_key: bytes) -> str:
+    return base64.urlsafe_b64encode(hashlib.sha256(raw_key).digest()[:12]).decode("ascii").rstrip("=")
+
+
+def _b64decode_required(value: object, field: str) -> bytes:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"encrypted context missing {field}")
+    try:
+        return base64.b64decode(value, validate=True)
+    except binascii.Error as e:
+        raise ValueError(f"encrypted context has invalid base64 in {field}") from e
+
+
+def _decrypt_agent_context(envelope: dict, profile_id: str) -> str:
+    """Decrypt a browser-produced Agent Access context envelope.
+
+    v2 separates relay authorization from content secrecy: GETBASED_TOKEN
+    authorizes the HTTPS fetch, while GETBASED_AGENT_CONTEXT_KEY decrypts the
+    AES-256-GCM payload locally. v1 token-derived envelopes remain readable as
+    a temporary rollout fallback.
+    """
+    if not isinstance(envelope, dict):
+        raise ValueError("encrypted context envelope is invalid")
+    version = envelope.get("version")
+    if envelope.get("alg") != "AES-256-GCM":
+        raise ValueError("unsupported encrypted context crypto parameters")
+
+    iv = _b64decode_required(envelope.get("iv"), "iv")
+    ciphertext = _b64decode_required(envelope.get("ciphertext"), "ciphertext")
+
+    if version == 2:
+        if envelope.get("keyDerivation") != "raw-256-bit-key":
+            raise ValueError("unsupported encrypted context crypto parameters")
+        raw_key = _decode_agent_context_key(AGENT_CONTEXT_KEY)
+        key_id = envelope.get("keyId")
+        if key_id and key_id != _agent_context_key_id(raw_key):
+            raise ValueError("encrypted context could not be decrypted with this Agent Context key")
+        aad = AGENT_CONTEXT_AAD_PREFIX + b":" + (profile_id or "default").encode("utf-8")
+        failure = "encrypted context could not be decrypted with this Agent Context key"
+    elif version == 1:
+        if not TOKEN:
+            raise ValueError("GETBASED_TOKEN not set")
+        if envelope.get("kdf") != "HKDF-SHA-256":
+            raise ValueError("unsupported encrypted context crypto parameters")
+        salt = _b64decode_required(envelope.get("salt"), "salt")
+        raw_key = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            info=AGENT_CONTEXT_V1_KDF_INFO,
+        ).derive(_token_bytes(TOKEN))
+        aad = AGENT_CONTEXT_V1_KDF_INFO + b":" + (profile_id or "default").encode("utf-8")
+        failure = "encrypted context could not be decrypted with this Agent Access token"
+    else:
+        raise ValueError("unsupported encrypted context version")
+
+    try:
+        plaintext = AESGCM(raw_key).decrypt(iv, ciphertext, aad)
+        return plaintext.decode("utf-8")
+    except InvalidTag as e:
+        raise ValueError(failure) from e
+    except UnicodeDecodeError as e:
+        raise ValueError("encrypted context decrypted to invalid UTF-8") from e
+
+
+def _decode_context_payload(data: dict) -> dict:
+    """Return gateway payload with plaintext `context` restored for tool code.
+
+    Legacy plaintext gateway rows are still accepted so existing users do not
+    lose access during rollout. New browser builds publish an encrypted JSON
+    envelope inside the relay's legacy `context` string field, because the
+    deployed relay validates that `context` is a string.
+    """
+    if not isinstance(data, dict):
+        return {"error": "getbased gateway returned invalid payload"}
+    envelope = data.get("encryptedContext")
+    context_value = data.get("context")
+    if not envelope and isinstance(context_value, str):
+        try:
+            parsed_context = json.loads(context_value)
+            if isinstance(parsed_context, dict):
+                envelope = parsed_context.get("encryptedContext")
+        except json.JSONDecodeError:
+            envelope = None
+    if envelope:
+        try:
+            profile_id = str(data.get("profileId") or "default")
+            decoded = dict(data)
+            decoded["context"] = _decrypt_agent_context(envelope, profile_id)
+            decoded.pop("encryptedContext", None)
+            return decoded
+        except ValueError as e:
+            return {"error": str(e)}
+    return data
+
+
+async def _fetch_context(profile: str = "", *, decrypt_context: bool = True) -> dict:
+    """Fetch formatted lab context from the getbased sync gateway.
+
+    Profile discovery only needs token-authenticated metadata. Keep it usable
+    even on token-only installs by letting callers opt out of context decrypt.
+    """
     if not TOKEN:
         return {"error": "GETBASED_TOKEN not set"}
     try:
@@ -191,7 +327,8 @@ async def _fetch_context(profile: str = "") -> dict:
                 params=params,
             )
             r.raise_for_status()
-            return r.json()
+            data = r.json()
+            return _decode_context_payload(data) if decrypt_context else data
     except httpx.HTTPStatusError as e:
         return {"error": f"getbased gateway returned {e.response.status_code}"}
     except httpx.RequestError as e:
@@ -526,7 +663,7 @@ async def getbased_wearables_series(
 @_instrumented("getbased_list_profiles")
 async def getbased_list_profiles() -> str:
     """List all available profiles in getbased."""
-    data = await _fetch_context()
+    data = await _fetch_context(decrypt_context=False)
     if "error" in data:
         return f"Error: {data['error']}"
     profiles = data.get("profiles") or []

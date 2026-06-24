@@ -23,6 +23,7 @@ def tmp_key_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("LENS_API_KEY_FILE", str(key_file))
     monkeypatch.setenv("LENS_URL", "http://lens.test:8322")
     monkeypatch.setenv("GETBASED_TOKEN", "test-gateway-token")
+    monkeypatch.setenv("GETBASED_AGENT_CONTEXT_KEY", "gbctx_v1_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
     monkeypatch.setenv("GETBASED_GATEWAY", "https://gateway.test")
     monkeypatch.setenv("LENS_MCP_ACTIVITY_LOG", str(tmp_path / "activity.jsonl"))
     return key_file

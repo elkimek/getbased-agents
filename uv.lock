@@ -562,9 +562,10 @@ provides-extras = ["test"]
 
 [[package]]
 name = "getbased-mcp"
-version = "0.2.5"
+version = "0.2.6"
 source = { editable = "packages/mcp" }
 dependencies = [
+    { name = "cryptography" },
     { name = "httpx" },
     { name = "mcp" },
 ]
@@ -578,6 +579,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=42.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },

@@ -6,7 +6,8 @@ Exercises every tool by calling the underlying async functions directly
 active sync gateway session, then run. Prints PASS/SKIP/FAIL per tool.
 
 Prereqs — any subset:
-  - GETBASED_TOKEN=... and GETBASED_GATEWAY=...  (default: sync.getbased.health)
+  - GETBASED_TOKEN=..., GETBASED_AGENT_CONTEXT_KEY=..., and GETBASED_GATEWAY=...
+    (default gateway: sync.getbased.health)
     → exercises getbased_lab_context, getbased_section, getbased_list_profiles
   - A running Lens RAG server + LENS_API_KEY_FILE readable
     → exercises knowledge_search, knowledge_list_libraries,
@@ -86,8 +87,13 @@ async def _run(name: str, fn: Callable[[], Awaitable[str]], prereq_ok: bool, pre
 async def main() -> int:
     counters = {"pass": 0, "skip": 0, "fail": 0}
 
-    gateway_ok = bool(gm.TOKEN)
-    gateway_why = "GETBASED_TOKEN not set — skipping lab-context tools"
+    gateway_ok = bool(gm.TOKEN and gm.AGENT_CONTEXT_KEY)
+    if not gm.TOKEN:
+        gateway_why = "GETBASED_TOKEN not set — skipping lab-context tools"
+    elif not gm.AGENT_CONTEXT_KEY:
+        gateway_why = "GETBASED_AGENT_CONTEXT_KEY not set — skipping encrypted lab-context tools"
+    else:
+        gateway_why = ""
 
     lens_key = gm._read_lens_key()
     lens_ok = bool(lens_key)
