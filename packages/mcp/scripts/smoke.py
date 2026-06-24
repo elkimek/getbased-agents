@@ -6,7 +6,8 @@ Exercises every tool by calling the underlying async functions directly
 active sync gateway session, then run. Prints PASS/SKIP/FAIL per tool.
 
 Prereqs — any subset:
-  - GETBASED_TOKEN=... and GETBASED_GATEWAY=...  (default: sync.getbased.health)
+  - GETBASED_TOKEN=..., GETBASED_AGENT_CONTEXT_KEY=..., and GETBASED_GATEWAY=...
+    (default gateway: sync.getbased.health)
     → exercises getbased_lab_context, getbased_section, getbased_list_profiles
   - A running Lens RAG server + LENS_API_KEY_FILE readable
     → exercises knowledge_search, knowledge_list_libraries,

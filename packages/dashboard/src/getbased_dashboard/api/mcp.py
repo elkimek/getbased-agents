@@ -64,12 +64,13 @@ def _resolved_mcp_env(cfg: DashboardConfig) -> dict:
         "lens_url": cfg.lens_url,
         "lens_api_key_file": key_file,
         "lens_api_key_present": key_present,
-        # GATEWAY / TOKEN are read from the dashboard process's env since
-        # spawned subprocesses inherit the dashboard's env by default.
+        # GATEWAY / Agent Access secrets are read from the dashboard process's
+        # env since spawned subprocesses inherit the dashboard's env by default.
         "getbased_gateway": os.environ.get(
             "GETBASED_GATEWAY", "https://sync.getbased.health"
         ),
         "getbased_token_present": bool(os.environ.get("GETBASED_TOKEN")),
+        "getbased_agent_context_key_present": bool(os.environ.get("GETBASED_AGENT_CONTEXT_KEY")),
         "mcp_module_path": _mcp.__file__,
     }
 
@@ -114,10 +115,11 @@ def _config_for_client(
     labels the download accordingly."""
     mcp_cmd = _mcp_command_path()
 
-    # Env block every client gets. Omit GETBASED_TOKEN — we don't have it,
-    # and emitting a placeholder string would mislead. The UI explains.
+    # Env block every client gets. Omit real Agent Access secrets — we don't
+    # have them, and emitting placeholders keeps the handoff explicit.
     env_block = {
-        "GETBASED_TOKEN": "<paste from getbased → Settings → Data → Agent Access>",
+        "GETBASED_TOKEN": "<paste token from getbased → Settings → Data → Agent Access>",
+        "GETBASED_AGENT_CONTEXT_KEY": "<paste context key from getbased → Settings → Data → Agent Access>",
         "LENS_URL": env_info["lens_url"],
         "LENS_API_KEY_FILE": env_info["lens_api_key_file"],
     }

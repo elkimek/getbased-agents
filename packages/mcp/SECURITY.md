@@ -6,10 +6,12 @@ getbased-mcp is a **thin HTTP client** spawned on-demand by MCP-capable agents (
 
 The MCP process is only as trusted as the agent that spawns it. If an untrusted agent has permission to execute `getbased-mcp`, they have:
 
-- Read access to `GETBASED_TOKEN` (sync gateway bearer) → a read-only summary of your lab data
+- Read access to `GETBASED_TOKEN` (sync gateway bearer) → can fetch the encrypted Agent Access payload
+- Read access to `GETBASED_AGENT_CONTEXT_KEY` (Agent Context key) → can decrypt that payload locally
+- Read access to both values → a read-only summary of your lab context
 - Read access to `LENS_API_KEY_FILE` contents → full query/management access to your local RAG library
 
-Run the MCP only under agents you trust. Revoke the gateway token in **Settings → Data → Agent Access** if exposure is suspected.
+Run the MCP only under agents you trust. Rotate the bearer token and/or context key in **Settings → Data → Agent Access** if exposure is suspected.
 
 ## What the MCP protects
 

@@ -57,9 +57,11 @@ pipx install getbased-dashboard      # web UI; pulls the MCP dep alongside it
 
 ```bash
 pipx install --include-deps "getbased-agent-stack[full]"
-getbased-stack init --yes                  # non-interactive: token skipped, API key
+getbased-stack init --yes                  # non-interactive: credentials skipped, API key
                                            # auto-generated, systemd units installed
                                            # and started. Drop --yes for the wizard.
+getbased-stack set GETBASED_TOKEN=...      # from getbased → Settings → Agent Access
+getbased-stack set GETBASED_AGENT_CONTEXT_KEY=...
 getbased-stack mcp-config claude-desktop   # paste the snippet into your MCP client
 ```
 

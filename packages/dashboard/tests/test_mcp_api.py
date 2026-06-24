@@ -30,9 +30,11 @@ def test_env_reports_lens_url_and_key_presence(
     assert body["lens_url"] == "http://lens.test:8322"
     # The key file was populated by the fixture; we should see present=True
     assert body["lens_api_key_present"] is True
-    # Token isn't set in tests — should report absent without revealing value
-    assert body["getbased_token_present"] is False
+    # Token/key presence is boolean-only — never echo values even if the parent env has them.
+    assert isinstance(body["getbased_token_present"], bool)
+    assert isinstance(body["getbased_agent_context_key_present"], bool)
     assert "getbased_token" not in body  # never echo the secret itself
+    assert "getbased_agent_context_key" not in body
 
 
 def test_env_does_not_mutate_os_environ(
@@ -85,8 +87,9 @@ def test_config_claude_desktop_json_shape(client: TestClient) -> None:
     entry = body["mcpServers"]["getbased"]
     assert entry["command"]  # something — path or bare name
     assert entry["env"]["LENS_URL"] == "http://lens.test:8322"
-    # Token placeholder, not a real value — user supplies this themselves
+    # Token/key placeholders, not real values — user supplies these themselves
     assert "<paste" in entry["env"]["GETBASED_TOKEN"]
+    assert "<paste" in entry["env"]["GETBASED_AGENT_CONTEXT_KEY"]
 
 
 @pytest.mark.parametrize("client_name", ["claude-code", "cursor", "cline"])
@@ -121,6 +124,7 @@ def test_config_openclaw_uses_nested_mcp_servers_shape(client: TestClient) -> No
     assert entry["args"] == []
     assert entry["env"]["LENS_URL"] == "http://lens.test:8322"
     assert "<paste" in entry["env"]["GETBASED_TOKEN"]
+    assert "<paste" in entry["env"]["GETBASED_AGENT_CONTEXT_KEY"]
 
 
 def test_config_hermes_is_yaml_with_enabled_tools(client: TestClient) -> None:
@@ -135,9 +139,10 @@ def test_config_hermes_is_yaml_with_enabled_tools(client: TestClient) -> None:
     assert "enabled_tools:" in txt
     assert "- knowledge_search" in txt
     assert "- knowledge_list_libraries" in txt
-    # Env block — keys present, token is a placeholder
+    # Env block — keys present, token/key are placeholders
     assert "GETBASED_TOKEN:" in txt
-    assert "paste from getbased" in txt
+    assert "GETBASED_AGENT_CONTEXT_KEY:" in txt
+    assert "paste" in txt
     assert "LENS_URL:" in txt
 
 

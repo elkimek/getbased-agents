@@ -8,8 +8,13 @@ Uses respx to intercept httpx calls. Verifies:
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 import respx
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from httpx import Response
 
 
@@ -19,6 +24,47 @@ from httpx import Response
 
 GATEWAY_CONTEXT_URL = "https://gateway.test/api/context"
 LENS_URL_PREFIX = "http://lens.test:8322"
+
+
+def _encrypted_context_payload(gm, context: str, profile_id: str = "abc", *, version: int = 2) -> dict:
+    import base64
+
+    iv = bytes(range(16, 28))
+    if version == 2:
+        raw_key = gm._decode_agent_context_key(gm.AGENT_CONTEXT_KEY)
+        aad = gm.AGENT_CONTEXT_AAD_PREFIX + b":" + profile_id.encode("utf-8")
+        ciphertext = AESGCM(raw_key).encrypt(iv, context.encode("utf-8"), aad)
+        envelope = {
+            "version": 2,
+            "alg": "AES-256-GCM",
+            "keyDerivation": "raw-256-bit-key",
+            "keyId": gm._agent_context_key_id(raw_key),
+            "iv": base64.b64encode(iv).decode("ascii"),
+            "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+        }
+    else:
+        salt = bytes(range(16))
+        key = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            info=gm.AGENT_CONTEXT_V1_KDF_INFO,
+        ).derive(gm._token_bytes(gm.TOKEN))
+        aad = gm.AGENT_CONTEXT_V1_KDF_INFO + b":" + profile_id.encode("utf-8")
+        ciphertext = AESGCM(key).encrypt(iv, context.encode("utf-8"), aad)
+        envelope = {
+            "version": 1,
+            "alg": "AES-256-GCM",
+            "kdf": "HKDF-SHA-256",
+            "info": gm.AGENT_CONTEXT_V1_KDF_INFO.decode("utf-8"),
+            "salt": base64.b64encode(salt).decode("ascii"),
+            "iv": base64.b64encode(iv).decode("ascii"),
+            "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+        }
+    return {
+        "profileId": profile_id,
+        "context": json.dumps({"encryptedContext": envelope}),
+    }
 
 
 @pytest.mark.asyncio
@@ -59,6 +105,60 @@ async def test_getbased_lab_context_happy(gm) -> None:
     assert "Profile: abc" in out
     assert "Updated: 2026-04-18" in out
     assert "testosterone" in out
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_lab_context_decrypts_agent_access_payload(gm) -> None:
+    plaintext = "[section:hormones]\ntestosterone: 18.4 nmol/L\n[/section:hormones]"
+    payload = _encrypted_context_payload(gm, plaintext, profile_id="abc")
+    assert "testosterone" not in payload["context"]
+    respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json=payload))
+
+    out = await gm.getbased_lab_context()
+
+    assert "Profile: abc" in out
+    assert "testosterone: 18.4" in out
+    assert "encryptedContext" not in out
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_lab_context_rejects_wrong_agent_context_key(gm, monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = _encrypted_context_payload(gm, "[section:hormones]\nsecret\n[/section:hormones]", profile_id="abc")
+    monkeypatch.setattr(gm, "AGENT_CONTEXT_KEY", "gbctx_v1_ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8")
+    respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json=payload))
+
+    out = await gm.getbased_lab_context()
+
+    assert "Error:" in out
+    assert "could not be decrypted" in out
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_lab_context_token_alone_cannot_decrypt_v2(gm, monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = _encrypted_context_payload(gm, "[section:hormones]\nsecret\n[/section:hormones]", profile_id="abc")
+    monkeypatch.setattr(gm, "AGENT_CONTEXT_KEY", "")
+    respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json=payload))
+
+    out = await gm.getbased_lab_context()
+
+    assert "Error:" in out
+    assert "GETBASED_AGENT_CONTEXT_KEY not set" in out
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_lab_context_keeps_v1_rollout_fallback(gm, monkeypatch: pytest.MonkeyPatch) -> None:
+    plaintext = "[section:hormones]\nlegacy secret\n[/section:hormones]"
+    payload = _encrypted_context_payload(gm, plaintext, profile_id="abc", version=1)
+    monkeypatch.setattr(gm, "AGENT_CONTEXT_KEY", "")
+    respx.get(GATEWAY_CONTEXT_URL).mock(return_value=Response(200, json=payload))
+
+    out = await gm.getbased_lab_context()
+
+    assert "legacy secret" in out
 
 
 @pytest.mark.asyncio
