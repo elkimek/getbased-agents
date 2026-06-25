@@ -175,6 +175,20 @@ def _config_for_client(
         }
         return "~/.openclaw/openclaw.json", json.dumps(body, indent=2)
 
+    if client == "codex":
+        lines = [
+            "# Paste into ~/.codex/config.toml",
+            "# Merge with existing [mcp_servers.*] tables if present.",
+            "",
+            "[mcp_servers.getbased]",
+            f"command = {json.dumps(mcp_cmd)}",
+            "args = []",
+            "",
+            "[mcp_servers.getbased.env]",
+            'GETBASED_STACK_MANAGED = "1"',
+        ]
+        return "~/.codex/config.toml", "\n".join(lines)
+
     if client == "hermes":
         # Hermes uses YAML and supports per-server tool allowlists via
         # `enabled_tools`. We inline the generation rather than pull
@@ -200,7 +214,7 @@ def _config_for_client(
         status_code=400,
         detail=(
             f"Unknown client '{client}'. Supported: "
-            "claude-desktop, claude-code, cursor, cline, hermes, openclaw"
+            "claude-desktop, claude-code, cursor, cline, hermes, openclaw, codex"
         ),
     )
 
@@ -352,7 +366,7 @@ def register(app: FastAPI) -> None:
     async def generate_config(
         request: Request,
         client: Literal[
-            "claude-desktop", "claude-code", "cursor", "cline", "hermes", "openclaw"
+            "claude-desktop", "claude-code", "cursor", "cline", "hermes", "openclaw", "codex"
         ] = "claude-desktop",
     ):
         cfg = _cfg(request)

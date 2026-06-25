@@ -126,6 +126,22 @@ def test_config_openclaw_uses_nested_mcp_servers_shape(client: TestClient) -> No
     assert "GETBASED_AGENT_CONTEXT_KEY" not in entry["env"]
 
 
+def test_config_codex_uses_toml_mcp_server_shape(client: TestClient) -> None:
+    r = client.get("/api/mcp/config?client=codex", headers=AUTH)
+    assert r.status_code == 200
+    out = r.json()
+    assert out["client"] == "codex"
+    assert "config.toml" in out["filename"]
+    txt = out["content"]
+    assert "[mcp_servers.getbased]" in txt
+    assert "command = " in txt
+    assert "args = []" in txt
+    assert "[mcp_servers.getbased.env]" in txt
+    assert 'GETBASED_STACK_MANAGED = "1"' in txt
+    assert "GETBASED_TOKEN" not in txt
+    assert "GETBASED_AGENT_CONTEXT_KEY" not in txt
+
+
 def test_config_hermes_is_yaml_with_enabled_tools(client: TestClient) -> None:
     r = client.get("/api/mcp/config?client=hermes", headers=AUTH)
     assert r.status_code == 200

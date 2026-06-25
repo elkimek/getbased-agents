@@ -217,6 +217,22 @@ def test_mcp_config_hermes(stack_home):
     assert "enabled_tools:" in out
 
 
+def test_mcp_config_openclaw(stack_home):
+    rc, out, _ = _run(["mcp-config", "openclaw"])
+    assert rc == 0
+    assert '"mcp"' in out
+    assert '"servers"' in out
+    assert '"GETBASED_STACK_MANAGED": "1"' in out
+
+
+def test_mcp_config_codex(stack_home):
+    rc, out, _ = _run(["mcp-config", "codex"])
+    assert rc == 0
+    assert "[mcp_servers.getbased]" in out
+    assert "[mcp_servers.getbased.env]" in out
+    assert 'GETBASED_STACK_MANAGED = "1"' in out
+
+
 def test_mcp_config_unknown_client():
     rc, _, _ = _run(["mcp-config", "vim"])
     # argparse rejects before our code runs — exit code 2, SystemExit
@@ -284,6 +300,26 @@ def test_connect_rejects_malformed_setup_blob(stack_home):
     assert rc == 2
     assert "Invalid setup" in err
     assert env_file.read_env_file() == {}
+
+
+def test_connect_non_hermes_clients_store_credentials_and_point_to_config(stack_home, monkeypatch):
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/local/bin/getbased-mcp" if name == "getbased-mcp" else None)
+    rc, out, err = _run(["connect", "openclaw", "--setup", _setup_blob()])
+    assert rc == 0, err
+    data = env_file.read_env_file()
+    assert data["GETBASED_STACK_MANAGED"] == "1"
+    assert data["GETBASED_TOKEN"] == "tok_123"
+    assert data["GETBASED_AGENT_CONTEXT_KEY"] == "ctx_456"
+    assert "getbased-stack mcp-config openclaw" in out
+    assert "tok_123" not in out
+    assert "ctx_456" not in out
+
+
+def test_connect_codex_is_an_allowed_setup_target(stack_home, monkeypatch):
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/local/bin/getbased-mcp" if name == "getbased-mcp" else None)
+    rc, out, err = _run(["connect", "codex", "--setup", _setup_blob()])
+    assert rc == 0, err
+    assert "getbased-stack mcp-config codex" in out
 
 
 def test_connect_skips_gateway_restart_when_running_inside_hermes(stack_home, monkeypatch):
