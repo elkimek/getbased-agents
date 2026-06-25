@@ -337,6 +337,51 @@ def _run_checked(cmd: "list[str]", label: str, *, required: bool = True, input_t
     return False
 
 
+def _process_tree_contains_hermes() -> bool:
+    """True when this command is running inside a Hermes-managed child process.
+
+    Restarting Hermes from a command spawned by the running gateway can SIGTERM
+    the setup process before it reports success. A normal SSH/shell terminal on
+    the same host will not have `hermes` in its parent process tree, so the
+    one-paste setup still performs the restart there.
+    """
+    if os.environ.get("GETBASED_STACK_ASSUME_HERMES_CHILD") == "1":
+        return True
+    if os.environ.get("GETBASED_STACK_ASSUME_HERMES_CHILD") == "0":
+        return False
+    pid = os.getppid()
+    seen: set[int] = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        proc = Path("/proc") / str(pid)
+        try:
+            comm = (proc / "comm").read_text(errors="ignore").strip().lower()
+            cmdline = (proc / "cmdline").read_text(errors="ignore").replace("\x00", " ").lower()
+            if comm == "hermes" or "hermes" in cmdline:
+                return True
+            stat = (proc / "stat").read_text(errors="ignore")
+            # /proc/<pid>/stat format: pid (comm) state ppid ...; comm may contain
+            # spaces, so split after the final ')'.
+            rest = stat.rsplit(")", 1)[1].strip().split()
+            pid = int(rest[1]) if len(rest) > 1 else 1
+        except Exception:
+            return False
+    return False
+
+
+def _maybe_restart_hermes_gateway(hermes: str, *, no_restart: bool) -> None:
+    if no_restart:
+        print("• Hermes gateway restart skipped by --no-restart. Run it manually after setup if Hermes is already running.")
+        return
+    if _process_tree_contains_hermes():
+        print("• Hermes gateway restart skipped because this setup is running inside Hermes. Restart Hermes from an external shell after this command finishes.")
+        return
+    if _run_checked([hermes, "gateway", "restart"], "Hermes gateway restart", required=False):
+        print("✓ Hermes gateway restart requested")
+    else:
+        print("• Restart Hermes manually if it is already running: hermes gateway restart")
+
+
 def cmd_connect(args: argparse.Namespace) -> int:
     client = args.client
     try:
@@ -374,10 +419,9 @@ def cmd_connect(args: argparse.Namespace) -> int:
         else:
             print("• Connection test skipped/failed; run `hermes mcp test getbased` after restarting Hermes.")
         if not args.no_restart:
-            if _run_checked([hermes, "gateway", "restart"], "Hermes gateway restart", required=False):
-                print("✓ Hermes gateway restart requested")
-            else:
-                print("• Restart Hermes manually if it is already running: hermes gateway restart")
+            _maybe_restart_hermes_gateway(hermes, no_restart=args.no_restart)
+        else:
+            _maybe_restart_hermes_gateway(hermes, no_restart=True)
         print("Done. Ask Hermes: “Read my getbased profile.”")
         return 0
 

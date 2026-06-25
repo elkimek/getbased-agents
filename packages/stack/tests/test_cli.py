@@ -241,6 +241,7 @@ def _setup_blob(token="tok_123", context_key="ctx_456", gateway="https://sync.ge
 
 
 def test_connect_hermes_setup_blob_stores_secrets_and_registers_mcp(stack_home, monkeypatch):
+    monkeypatch.setenv("GETBASED_STACK_ASSUME_HERMES_CHILD", "0")
     calls = []
     monkeypatch.setattr(cli.shutil, "which", lambda name: {
         "getbased-mcp": "/usr/local/bin/getbased-mcp",
@@ -283,6 +284,32 @@ def test_connect_rejects_malformed_setup_blob(stack_home):
     assert rc == 2
     assert "Invalid setup" in err
     assert env_file.read_env_file() == {}
+
+
+def test_connect_skips_gateway_restart_when_running_inside_hermes(stack_home, monkeypatch):
+    monkeypatch.setenv("GETBASED_STACK_ASSUME_HERMES_CHILD", "1")
+    calls = []
+    monkeypatch.setattr(cli.shutil, "which", lambda name: {
+        "getbased-mcp": "/usr/local/bin/getbased-mcp",
+        "hermes": "/usr/local/bin/hermes",
+    }.get(name))
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs.get("input")))
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+        return Result()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    rc, out, err = _run(["connect", "hermes", "--setup", _setup_blob()])
+
+    assert rc == 0, err
+    assert (["/usr/local/bin/hermes", "mcp", "test", "getbased"], None) in calls
+    assert all(cmd != ["/usr/local/bin/hermes", "gateway", "restart"] for cmd, _ in calls)
+    assert "restart skipped because this setup is running inside Hermes" in out
 
 
 # ── init (non-interactive via EOF on stdin) ───────────────────────────
