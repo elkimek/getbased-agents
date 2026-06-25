@@ -1,12 +1,12 @@
 # getbased-dashboard
 
-Web dashboard for [getbased-agents](https://github.com/elkimek/getbased-agents) — one page that covers knowledge library management, MCP client setup, and agent-activity inspection. Matches the getbased PWA's browser-local lens UX for users running the external-server backend.
+Web dashboard for [getbased-agents](https://github.com/elkimek/getbased-agents). It lets you manage knowledge libraries, generate MCP client config, test the MCP adapter, and inspect recent agent activity.
 
 ---
 
 ## What it looks like
 
-Three tabs, single auth gate, one pill for ingest progress that lives outside the tab DOM so it survives navigation.
+Three tabs, one auth gate, and a bottom-right ingest progress pill that survives tab changes.
 
 ### Knowledge tab
 - Engine badge strip at the top: `ONNX · CPU · MiniLM-L6-v2 · 384d · floor 0.55 · ready`
@@ -16,9 +16,9 @@ Three tabs, single auth gate, one pill for ingest progress that lives outside th
 - Search preview with score per result
 - Sources panel sorted by chunk count desc, Delete-all + per-source delete
 
-### MCP tab
-- Env viewer showing what a spawned MCP would see (`LENS_URL`, `LENS_API_KEY_FILE` + present/missing, `GETBASED_TOKEN` and `GETBASED_AGENT_CONTEXT_KEY` set/not set, module path). Tooltips explain the difference between "dashboard's env" and "client's MCP env block"
-- Config generator — emits paste-ready blocks for **Claude Desktop**, **Claude Code**, **Cursor**, **Cline**, **Hermes**, **OpenClaw**. JSON `mcpServers.<name>` for the Anthropic-shape clients, YAML with `enabled_tools` allowlist for Hermes, JSON `mcp.servers.<name>` for OpenClaw. Copy-to-clipboard button.
+- MCP tab
+- Env viewer showing what a spawned MCP would see (`LENS_URL`, `LENS_API_KEY_FILE` + present/missing, `GETBASED_TOKEN` and `GETBASED_AGENT_CONTEXT_KEY` set/not set, module path). Tooltips explain the difference between the dashboard environment and the environment an MCP client will pass to the server.
+- Config generator — emits paste-ready blocks for **Claude Desktop**, **Claude Code**, **Cursor**, **Cline**, **Codex CLI**, **Hermes**, and **OpenClaw**. Generated config uses `GETBASED_STACK_MANAGED=1` so secrets stay in the shared getbased env file, not in the client config.
 - "Test MCP" — spawns the real `getbased-mcp` binary via stdio, runs `initialize` + `tools/list`, returns elapsed ms + tool names
 
 ### Activity tab
@@ -42,7 +42,7 @@ Or as part of the full stack:
 
 ```bash
 pipx install "getbased-agent-stack[full]"
-lens serve                       # in one terminal — the RAG backend
+lens serve                       # in one terminal — the local knowledge server
 getbased-dashboard serve         # in another — the UI
 ```
 
@@ -77,7 +77,7 @@ The dashboard holds no data. Delete it and your knowledge base is untouched.
 | `LENS_API_KEY_FILE` | `$XDG_DATA_HOME/getbased/lens/api_key` (with legacy fallback to `~/.hermes/rag/lens_api_key`) | Shared bearer token — same one MCP reads |
 | `DASHBOARD_ACTIVITY_LOG` | `$XDG_STATE_HOME/getbased/mcp/activity.jsonl` | JSONL path the MCP writes to; dashboard tails it |
 | `DASHBOARD_MAX_INGEST_BYTES` | `268435456` (256 MB) | Cap on a single upload's total size |
-| `GETBASED_TOKEN` / `GETBASED_AGENT_CONTEXT_KEY` | (from env) | Optional. When set, the MCP tab's env viewer reads "set" and the config generator bakes placeholders for both into client env blocks. Typically you leave them unset locally and set them in your AI client's MCP config |
+| `GETBASED_TOKEN` / `GETBASED_AGENT_CONTEXT_KEY` | (from env) | Optional. When set, the MCP tab's env viewer reads "set". Stack-managed client configs normally avoid embedding these secrets and read them from the shared getbased env file instead. |
 
 ---
 

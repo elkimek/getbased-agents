@@ -1,11 +1,13 @@
 # getbased-agents
 
-Monorepo for the [getbased](https://getbased.health) agent ecosystem — MCP server, RAG backend, web dashboard, and a meta-package that wires them together.
+Monorepo for the [getbased](https://getbased.health) agent tools: the MCP adapter, local knowledge server, browser dashboard, and a meta-package that wires them together.
+
+If you are connecting an AI assistant to your private getbased context, use the setup command copied from **Settings → Agent Access** in the app. The public install command below installs software only; it does not grant access to your health data.
 
 | Package | PyPI | Role | Contents |
 |---|---|---|---|
-| [`getbased-mcp`](packages/mcp/) | [`getbased-mcp`](https://pypi.org/project/getbased-mcp/) | MCP adapter for Claude Code / Hermes / OpenClaw / any MCP client | stdio ↔ HTTP |
-| [`getbased-rag`](packages/rag/) | [`getbased-rag`](https://pypi.org/project/getbased-rag/) | Local RAG knowledge server. Also the PWA's "External server" Knowledge Base backend | FastAPI + Qdrant + MiniLM/BGE |
+| [`getbased-mcp`](packages/mcp/) | [`getbased-mcp`](https://pypi.org/project/getbased-mcp/) | MCP adapter for Claude Code, Claude Desktop, Cursor, Cline, Codex CLI, Hermes, OpenClaw, or another MCP client | stdio ↔ HTTP |
+| [`getbased-rag`](packages/rag/) | [`getbased-rag`](https://pypi.org/project/getbased-rag/) | Local knowledge server. Also the PWA's "External server" Knowledge Base backend | FastAPI + Qdrant + MiniLM/BGE |
 | [`getbased-dashboard`](packages/dashboard/) | [`getbased-dashboard`](https://pypi.org/project/getbased-dashboard/) | Browser UI: manage knowledge libraries, generate MCP client configs, see agent activity | FastAPI + vanilla JS |
 | [`getbased-agent-stack`](packages/stack/) | [`getbased-agent-stack`](https://pypi.org/project/getbased-agent-stack/) | Meta-package pinning all three siblings | thin CLI + systemd unit + example configs |
 
@@ -17,19 +19,27 @@ Claude Code / Hermes / OpenClaw           Browser
    │        │                        │             │
    │ HTTP   │ HTTP                   │ proxies     │ spawns stdio
    ▼        ▼                        ▼             ▼
-sync GW   getbased-rag  ◄──────────┘         getbased-mcp
+context gateway   getbased-rag  ◄──────┘     getbased-mcp
           (localhost:8322)
 ```
 
 ## Install
 
-Linux, zero-friction — `curl | bash`:
+Linux public install:
 
 ```bash
 curl -sSL https://getbased.health/install.sh | bash
 ```
 
-The script auto-detects `uv` or `pipx` (install either one first if you have neither), installs `getbased-agent-stack[full]` with sibling binaries exposed, runs `getbased-stack init --yes`, and starts `getbased-rag` + `getbased-dashboard` as systemd user services. [Read it first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious — `curl -sSL https://getbased.health/install.sh.sha256 | sha256sum -c` verifies the published hash.
+The script auto-detects `uv` or `pipx` (install either one first if you have neither), installs `getbased-agent-stack[full]` with sibling binaries exposed, runs `getbased-stack init --yes`, and starts `getbased-rag` + `getbased-dashboard` as systemd user services. [Read it first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious. Verify the published hash with `curl -sSL https://getbased.health/install.sh.sha256 | sha256sum -c`.
+
+Private Agent Access setup is copied from getbased itself and looks like this:
+
+```bash
+curl -fsSL https://getbased.health/install.sh | bash -s -- connect <target> --setup 'gbsetup_v1_...'
+```
+
+The setup payload contains private credentials. Do not paste it into public logs, issues, or READMEs.
 
 Manual install (macOS, Windows, WSL1, or if you'd rather not run a shell script):
 
@@ -48,24 +58,32 @@ uv tool install \
 Or pick the piece you actually need:
 
 ```bash
-pipx install getbased-mcp            # agents for lab data only, no RAG  (~10 MB)
-pipx install "getbased-rag[full]"    # RAG backend for the PWA, no agents (~500 MB)
+pipx install getbased-mcp            # agents for lab data only, no knowledge server (~10 MB)
+pipx install "getbased-rag[full]"    # local knowledge server for the PWA, no agents (~500 MB)
 pipx install getbased-dashboard      # web UI; pulls the MCP dep alongside it
 ```
 
-## Quickstart (manual)
+## Quickstart
+
+Private one-paste setup from getbased:
+
+```bash
+# Copy this shape from getbased → Settings → Agent Access.
+# The real setup payload is private.
+curl -fsSL https://getbased.health/install.sh | bash -s -- connect hermes --setup 'gbsetup_v1_...'
+```
+
+Manual setup:
 
 ```bash
 pipx install --include-deps "getbased-agent-stack[full]"
-getbased-stack init --yes                  # non-interactive: credentials skipped, API key
-                                           # auto-generated, systemd units installed
-                                           # and started. Drop --yes for the wizard.
+getbased-stack init --yes                  # creates the env file, API key, and systemd units where supported
 getbased-stack set GETBASED_TOKEN=...      # from getbased → Settings → Agent Access
 getbased-stack set GETBASED_AGENT_CONTEXT_KEY=...
 getbased-stack mcp-config claude-desktop   # paste the snippet into your MCP client
 ```
 
-`--include-deps` exposes `getbased-mcp`, `lens`, and `getbased-dashboard` alongside `getbased-stack` on your PATH — without it, pipx hides the sibling binaries inside the venv. See [`packages/stack/README.md`](packages/stack/README.md) for the full flow including linger-for-headless and token rotation.
+`--include-deps` exposes `getbased-mcp`, `lens`, and `getbased-dashboard` alongside `getbased-stack` on your PATH. Without it, pipx hides the sibling binaries inside the venv. See [`packages/stack/README.md`](packages/stack/README.md) for the full flow, supported targets, linger-for-headless, and token rotation.
 
 ## Development
 
