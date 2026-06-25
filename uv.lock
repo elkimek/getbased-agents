@@ -494,7 +494,7 @@ wheels = [
 
 [[package]]
 name = "getbased-agent-stack"
-version = "0.5.4"
+version = "0.5.5"
 source = { editable = "packages/stack" }
 dependencies = [
     { name = "getbased-dashboard" },
