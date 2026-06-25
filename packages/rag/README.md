@@ -1,8 +1,8 @@
 # getbased-rag
 
-> **Installing for the first time?** The [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack) meta-package bundles this server with the MCP that Claude Code / Hermes / OpenClaw talk to, plus [getbased-dashboard](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard) for a browser UI. One command and you're up.
+> **Installing for the first time?** The [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack) meta-package bundles this server with the MCP adapter and [getbased-dashboard](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard). Use it unless you only want the knowledge server.
 
-A standalone RAG knowledge server — the backend that used to ship inside the getbased Electron desktop app, now just Python. Point any client (the getbased PWA's *External server* lens backend, the dashboard, or your own) at it.
+A standalone local knowledge server for getbased. Point the getbased PWA's **External server** Knowledge Base backend, the dashboard, or your own compatible client at it.
 
 - **Stack**: FastAPI + Uvicorn · Qdrant (embedded local mode) · sentence-transformers / ONNX Runtime
 - **Default port**: 8322, loopback only
@@ -95,7 +95,7 @@ The dashboard uses the streaming path for its bottom-right pill (chunks/sec rate
 
 ## Wiring into the getbased PWA
 
-In the PWA: **Settings → AI → Knowledge Base → External server**
+In the PWA: open **Knowledge Base**, choose **External server**, then enter:
 
 | Field | Value |
 |---|---|
@@ -106,7 +106,7 @@ Click **Save**, then **Test connection**. `rag_ready: false` is expected before 
 
 ### Agent access (Claude Code, Hermes, OpenClaw, etc.)
 
-Pair this server with [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp) to expose `knowledge_search`, `knowledge_list_libraries`, `knowledge_activate_library`, and `knowledge_stats` as MCP tools. Typical setup: run both the lens server and getbased-mcp on the same VM, point MCP's `LENS_URL` at `http://localhost:8322`.
+Pair this server with [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp) to expose `knowledge_search`, `knowledge_list_libraries`, `knowledge_activate_library`, and `knowledge_stats` as MCP tools. Typical setup: run both the knowledge server and getbased-mcp on the same machine, then point MCP's `LENS_URL` at `http://localhost:8322`.
 
 ### Browser UI
 
@@ -204,4 +204,4 @@ AGPL-3.0-or-later.
 
 ## Lineage
 
-This repo is the Python portion lifted out of [getbased](https://github.com/elkimek/getbased) after the Electron desktop app was retired. The PWA's `external-server` lens backend speaks this same HTTP contract unchanged.
+This repo is the Python knowledge-server portion lifted out of [getbased](https://github.com/elkimek/get-based) after the Electron desktop app was retired. The PWA's external-server Knowledge Base backend speaks this same HTTP contract.

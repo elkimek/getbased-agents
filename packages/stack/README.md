@@ -1,6 +1,6 @@
 # getbased-agent-stack
 
-Meta-package bundling the full [getbased](https://getbased.health) agent stack into one install: the MCP adapter, the RAG engine, the browser dashboard, an orchestration CLI (`init` / `install` / `mcp-config`), hardened systemd units for rag + dashboard, and paste-ready configs for Claude Desktop/Code, Cursor, Cline, and Hermes.
+Meta-package bundling the full [getbased](https://getbased.health) agent stack into one install: the MCP adapter, the local knowledge server, the browser dashboard, an orchestration CLI (`init` / `install` / `connect` / `mcp-config`), systemd user units for the knowledge server + dashboard, and paste-ready configs for Claude Code, Claude Desktop, Cursor, Cline, Codex CLI, Hermes, and OpenClaw.
 
 Part of the [getbased-agents monorepo](https://github.com/elkimek/getbased-agents).
 
@@ -12,7 +12,15 @@ Linux, one command:
 curl -sSL https://getbased.health/install.sh | bash
 ```
 
-Runs end-to-end: installs `getbased-agent-stack[full]` via whichever of `uv` or `pipx` is available, exposes sibling binaries, runs `getbased-stack init --yes`, and starts rag + dashboard as systemd user services. [Read the script first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious.
+Runs end-to-end: installs `getbased-agent-stack[full]` via whichever of `uv` or `pipx` is available, exposes sibling binaries, runs `getbased-stack init --yes`, and starts the knowledge server + dashboard as systemd user services. [Read the script first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious.
+
+If you are connecting a private getbased profile, copy the command from **Settings → Agent Access** in the app. It uses the same installer and then runs `getbased-stack connect` for the selected client:
+
+```bash
+curl -fsSL https://getbased.health/install.sh | bash -s -- connect <target> --setup 'gbsetup_v1_...'
+```
+
+That setup payload contains private credentials. Keep it out of logs and public issues.
 
 Manual — pipx:
 
@@ -37,7 +45,7 @@ uv tool install \
 Pulls:
 
 - [`getbased-mcp`](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp) — stdio MCP server that Claude Code / Hermes / OpenClaw spawn
-- [`getbased-rag`](https://github.com/elkimek/getbased-agents/tree/main/packages/rag) — local RAG knowledge server (FastAPI + Qdrant + MiniLM/BGE)
+- [`getbased-rag`](https://github.com/elkimek/getbased-agents/tree/main/packages/rag) — local knowledge server (FastAPI + Qdrant + MiniLM/BGE)
 - [`getbased-dashboard`](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard) — web UI for library management, MCP config generation, and agent-activity inspection
 - The `getbased-stack` discovery CLI
 - `[full]` extra: PDF/DOCX parsers + ONNX runtime for hardware-accelerated embeddings
@@ -67,10 +75,16 @@ The wizard (~30 seconds):
 
 On non-systemd hosts (Docker, macOS, WSL1) step 4 writes the unit files but skips activation with a clear message instead of crashing — re-run on a systemd-enabled host or start `lens serve` + `getbased-dashboard serve` manually.
 
-Then paste one line into your MCP client:
+Private setup from the app:
 
 ```bash
-getbased-stack mcp-config claude-desktop   # or: claude-code, cursor, cline, hermes
+getbased-stack connect hermes --setup 'gbsetup_v1_...'
+```
+
+Manual config helper:
+
+```bash
+getbased-stack mcp-config claude-desktop   # or: claude-code, cursor, cline, codex, hermes, openclaw
 ```
 
 The snippet carries only `GETBASED_STACK_MANAGED=1` in its env block. No secrets in client configs — every MCP spawn reads the shared env file and loads the token + rag URL + API key path from there.
@@ -125,7 +139,7 @@ Claude Code / Hermes / OpenClaw          Browser
    │        │                          │             │
    │ HTTP   │ HTTP                     │ proxies     │ spawns stdio for Test
    ▼        ▼                          ▼             ▼
-sync GW   getbased-rag  ◀──────────────┘       getbased-mcp
+context gateway   getbased-rag  ◀────────┘     getbased-mcp
           (localhost:8322)
 ```
 
@@ -143,6 +157,7 @@ The dashboard is likewise stateless — it proxies rag for Knowledge operations,
 | 0.1.x | ≥0.2.0 | ≥0.1.0 | — | v1 (multi-library) |
 | 0.2.x | ≥0.2.2 | ≥0.6.0 | ≥0.5.0 | v1 (+ streaming ingest, per-library models) |
 | 0.4.x | ≥0.2.3 | ≥0.7.1 | ≥0.6.1 | v1 (+ shared env file, `getbased-stack init`, systemd units) |
+| 0.5.x | ≥0.2.6 | ≥0.7.3 | ≥0.6.5 | v1 (+ `getbased-stack connect`, multi-client setup targets) |
 
 Bump the meta's major when sibling protocols break; bump siblings freely for normal features.
 
