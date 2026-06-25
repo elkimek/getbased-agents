@@ -64,15 +64,19 @@ def _resolved_mcp_env(cfg: DashboardConfig) -> dict:
         "lens_url": cfg.lens_url,
         "lens_api_key_file": key_file,
         "lens_api_key_present": key_present,
-        # GATEWAY / Agent Access secrets are read from the dashboard process's
-        # env since spawned subprocesses inherit the dashboard's env by default.
+        # GATEWAY / TOKEN / CONTEXT KEY are inherited by spawned MCP
+        # subprocesses. In stack-managed installs the systemd unit reads
+        # ~/.config/getbased/env, and generated client snippets set only
+        # GETBASED_STACK_MANAGED=1 so getbased-mcp loads that same file.
         "getbased_gateway": os.environ.get(
             "GETBASED_GATEWAY", "https://sync.getbased.health"
         ),
         "getbased_token_present": bool(os.environ.get("GETBASED_TOKEN")),
         "getbased_agent_context_key_present": bool(os.environ.get("GETBASED_AGENT_CONTEXT_KEY")),
+        "getbased_stack_managed": os.environ.get("GETBASED_STACK_MANAGED") == "1",
         "mcp_module_path": _mcp.__file__,
     }
+
 
 
 def _mcp_command_path() -> str:
@@ -115,18 +119,15 @@ def _config_for_client(
     labels the download accordingly."""
     mcp_cmd = _mcp_command_path()
 
-    # Env block every client gets. Omit real Agent Access secrets — we don't
-    # have them, and emitting placeholders keeps the handoff explicit.
-    env_block = {
-        "GETBASED_TOKEN": "<paste token from getbased → Settings → Data → Agent Access>",
-        "GETBASED_AGENT_CONTEXT_KEY": "<paste context key from getbased → Settings → Data → Agent Access>",
-        "LENS_URL": env_info["lens_url"],
-        "LENS_API_KEY_FILE": env_info["lens_api_key_file"],
-    }
+    # Env block every client gets. Secrets stay in the stack's shared
+    # ~/.config/getbased/env file, managed by `getbased-stack set ...`.
+    # The MCP process loads that file only when this opt-in flag is present.
+    env_block = {"GETBASED_STACK_MANAGED": "1"}
 
     enabled_tools = [
         "getbased_lab_context",
         "getbased_section",
+        "getbased_wearables_series",
         "getbased_list_profiles",
         "getbased_lens_config",
         "knowledge_search",
@@ -213,9 +214,11 @@ async def _stdio_probe(cfg: DashboardConfig, timeout_s: float = 10.0) -> dict:
     mcp_cmd = _mcp_command_path()
 
     env = os.environ.copy()
-    # Propagate the dashboard's view of where lens lives + the key file.
-    # Ensures the spawned MCP resolves the same paths the env-viewer UI
-    # reports, even if the dashboard process's own env differs.
+    # Match the generated snippets: MCP should load the stack-managed
+    # shared env file, where Agent Access token/key and Lens settings live.
+    env["GETBASED_STACK_MANAGED"] = "1"
+    # Keep explicit Lens values too so non-stack/dev dashboard launches still
+    # test against the dashboard's configured RAG endpoint.
     env["LENS_URL"] = cfg.lens_url
     env["LENS_API_KEY_FILE"] = str(cfg.api_key_file)
 

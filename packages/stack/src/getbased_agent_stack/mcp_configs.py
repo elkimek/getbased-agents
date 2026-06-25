@@ -18,12 +18,15 @@ from typing import Callable
 
 SUPPORTED_CLIENTS = ("claude-desktop", "claude-code", "cursor", "cline", "hermes")
 
-# Single-token list for the Hermes snippet. Matches the tool set the MCP
-# server exposes as of getbased-mcp 0.2.2. Keep alphabetical for diff-friendliness.
+# Single-token list for the Hermes snippet. Matches the lab-context +
+# knowledge tools exposed by current getbased-mcp. Keep alphabetical for
+# diff-friendliness.
 HERMES_ENABLED_TOOLS = [
+    "getbased_lab_context",
     "getbased_lens_config",
     "getbased_list_profiles",
-    "getbased_read_profile",
+    "getbased_section",
+    "getbased_wearables_series",
     "knowledge_activate_library",
     "knowledge_list_libraries",
     "knowledge_search",
