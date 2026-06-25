@@ -16,7 +16,15 @@ import shutil
 from typing import Callable
 
 
-SUPPORTED_CLIENTS = ("claude-desktop", "claude-code", "cursor", "cline", "hermes")
+SUPPORTED_CLIENTS = (
+    "claude-desktop",
+    "claude-code",
+    "cursor",
+    "cline",
+    "hermes",
+    "openclaw",
+    "codex",
+)
 
 # Single-token list for the Hermes snippet. Matches the lab-context +
 # knowledge tools exposed by current getbased-mcp. Keep alphabetical for
@@ -118,6 +126,49 @@ def emit_cline(resolver: Callable[[str], "str | None"] = shutil.which) -> str:
     return banner + json.dumps(payload, indent=2) + "\n"
 
 
+def emit_openclaw(resolver: Callable[[str], "str | None"] = shutil.which) -> str:
+    """OpenClaw nests MCP servers under `mcp.servers.<name>` rather than
+    the Anthropic-style top-level `mcpServers` key."""
+    cmd = _resolve_mcp_binary(resolver)
+    body = {
+        "mcp": {
+            "servers": {
+                "getbased": {
+                    "command": cmd,
+                    "args": [],
+                    "env": {"GETBASED_STACK_MANAGED": "1"},
+                }
+            }
+        }
+    }
+    banner = "// Paste into ~/.openclaw/openclaw.json, or adapt for `openclaw mcp set getbased`.\n"
+    banner = _prepend_warning(banner, _resolver_warning(cmd))
+    return banner + json.dumps(body, indent=2) + "\n"
+
+
+def emit_codex(resolver: Callable[[str], "str | None"] = shutil.which) -> str:
+    """OpenAI Codex CLI uses TOML config under ~/.codex/config.toml."""
+    cmd = _resolve_mcp_binary(resolver)
+    warning = _resolver_warning(cmd)
+    lines = [
+        "# Paste into ~/.codex/config.toml",
+        "# Merge with existing [mcp_servers.*] tables if present.",
+    ]
+    if warning:
+        lines.append("#")
+        lines.extend(f"# {line}" for line in warning.splitlines())
+    lines.extend([
+        "",
+        '[mcp_servers.getbased]',
+        f'command = {json.dumps(cmd)}',
+        "args = []",
+        "",
+        '[mcp_servers.getbased.env]',
+        'GETBASED_STACK_MANAGED = "1"',
+    ])
+    return "\n".join(lines) + "\n"
+
+
 def emit_hermes(resolver: Callable[[str], "str | None"] = shutil.which) -> str:
     """Hermes uses YAML — we emit by hand (no yaml dep) since the shape
     is trivial. Includes enabled_tools for parity with the existing
@@ -175,6 +226,10 @@ def emit(client: str, resolver: Callable[[str], "str | None"] = shutil.which) ->
             return emit_cline(resolver)
         case "hermes":
             return emit_hermes(resolver)
+        case "openclaw":
+            return emit_openclaw(resolver)
+        case "codex":
+            return emit_codex(resolver)
         case _:
             raise ValueError(
                 f"unknown client {client!r}. Supported: {', '.join(SUPPORTED_CLIENTS)}"

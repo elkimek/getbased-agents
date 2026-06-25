@@ -33,6 +33,8 @@ def test_supported_clients_stable_list():
         "cursor",
         "cline",
         "hermes",
+        "openclaw",
+        "codex",
     )
 
 
@@ -61,6 +63,27 @@ def test_hermes_emits_yaml_shape():
     assert 'GETBASED_STACK_MANAGED: "1"' in out
     assert "enabled_tools:" in out
     assert "      - knowledge_search" in out
+
+
+def test_openclaw_emits_nested_mcp_servers_shape():
+    out = mcp_configs.emit("openclaw", resolver=_fake_resolver())
+    json_lines = [line for line in out.splitlines() if not line.startswith("//")]
+    payload = json.loads("\n".join(json_lines))
+    assert "mcpServers" not in payload
+    server = payload["mcp"]["servers"]["getbased"]
+    assert server["command"] == "/usr/local/bin/getbased-mcp"
+    assert server["args"] == []
+    assert server["env"] == {"GETBASED_STACK_MANAGED": "1"}
+
+
+def test_codex_emits_toml_shape():
+    out = mcp_configs.emit("codex", resolver=_fake_resolver())
+    assert "# Paste into ~/.codex/config.toml" in out
+    assert "[mcp_servers.getbased]" in out
+    assert 'command = "/usr/local/bin/getbased-mcp"' in out
+    assert "args = []" in out
+    assert "[mcp_servers.getbased.env]" in out
+    assert 'GETBASED_STACK_MANAGED = "1"' in out
 
 
 def test_no_secret_values_in_snippets():
@@ -101,6 +124,12 @@ def test_fallback_emits_warning_for_json_clients(client):
 
 def test_fallback_emits_warning_for_hermes():
     out = mcp_configs.emit("hermes", resolver=_fake_resolver(found=None))
+    assert "WARNING" in out
+
+
+@pytest.mark.parametrize("client", ["openclaw", "codex"])
+def test_fallback_emits_warning_for_new_agent_clients(client):
+    out = mcp_configs.emit(client, resolver=_fake_resolver(found=None))
     assert "WARNING" in out
 
 
