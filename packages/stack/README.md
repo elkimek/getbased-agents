@@ -60,7 +60,7 @@ getbased-stack init --yes
 
 The wizard (~30 seconds):
 
-1. Prompts for your `GETBASED_TOKEN` and `GETBASED_AGENT_CONTEXT_KEY` (skip if you don't use Agent Access; `--yes` keeps current values and lets you set them later with `getbased-stack set ...`)
+1. Prompts for your `GETBASED_TOKEN` and `GETBASED_AGENT_CONTEXT_KEY` when you opt into Agent Access (skip if you don't use Agent Access; `--yes` skips prompts)
 2. Generates a rag API key if one doesn't exist
 3. Writes `~/.config/getbased/env` (mode 0600) — the shared config file
 4. Installs systemd user units for rag + dashboard, enables them, starts them

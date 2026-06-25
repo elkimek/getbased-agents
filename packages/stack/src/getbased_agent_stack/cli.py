@@ -16,9 +16,12 @@ python-dotenv. The env file format is simple enough that we own it.
 from __future__ import annotations
 
 import argparse
+import base64
+import json
 import os
 import secrets
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -289,6 +292,143 @@ def cmd_mcp_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _decode_setup_payload(setup: str) -> "dict[str, str]":
+    prefix = "gbsetup_v1_"
+    if not setup.startswith(prefix):
+        raise ValueError("setup code must start with gbsetup_v1_")
+    raw = setup[len(prefix):].strip()
+    if not raw:
+        raise ValueError("empty setup payload")
+    padded = raw + "=" * (-len(raw) % 4)
+    try:
+        data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("setup payload is not valid base64url JSON") from exc
+    if not isinstance(data, dict) or data.get("version") != 1:
+        raise ValueError("unsupported setup payload version")
+    token = str(data.get("token") or "").strip()
+    context_key = str(data.get("contextKey") or data.get("context_key") or "").strip()
+    gateway = str(data.get("gateway") or "https://sync.getbased.health").strip()
+    if not token:
+        raise ValueError("setup payload is missing token")
+    if not context_key:
+        raise ValueError("setup payload is missing contextKey")
+    if not gateway.startswith(("https://", "http://")):
+        raise ValueError("gateway must be an http(s) URL")
+    return {"token": token, "context_key": context_key, "gateway": gateway}
+
+
+def _run_checked(cmd: "list[str]", label: str, *, required: bool = True, input_text: str | None = None) -> bool:
+    try:
+        res = subprocess.run(cmd, text=True, input=input_text, capture_output=True, check=False)
+    except FileNotFoundError:
+        if required:
+            print(f"{label} failed: command not found: {cmd[0]}", file=sys.stderr)
+        else:
+            print(f"  skipped {label}: command not found: {cmd[0]}")
+        return False
+    if res.returncode == 0:
+        return True
+    msg = (res.stderr or res.stdout or "").strip()
+    if required:
+        print(f"{label} failed ({res.returncode})" + (f": {msg}" if msg else ""), file=sys.stderr)
+    else:
+        print(f"  skipped {label}: command exited {res.returncode}" + (f" ({msg})" if msg else ""))
+    return False
+
+
+def _process_tree_contains_hermes() -> bool:
+    """True when this command is running inside a Hermes-managed child process.
+
+    Restarting Hermes from a command spawned by the running gateway can SIGTERM
+    the setup process before it reports success. A normal SSH/shell terminal on
+    the same host will not have `hermes` in its parent process tree, so the
+    one-paste setup still performs the restart there.
+    """
+    if os.environ.get("GETBASED_STACK_ASSUME_HERMES_CHILD") == "1":
+        return True
+    if os.environ.get("GETBASED_STACK_ASSUME_HERMES_CHILD") == "0":
+        return False
+    pid = os.getppid()
+    seen: set[int] = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        proc = Path("/proc") / str(pid)
+        try:
+            comm = (proc / "comm").read_text(errors="ignore").strip().lower()
+            cmdline = (proc / "cmdline").read_text(errors="ignore").replace("\x00", " ").lower()
+            if comm == "hermes" or "hermes" in cmdline:
+                return True
+            stat = (proc / "stat").read_text(errors="ignore")
+            # /proc/<pid>/stat format: pid (comm) state ppid ...; comm may contain
+            # spaces, so split after the final ')'.
+            rest = stat.rsplit(")", 1)[1].strip().split()
+            pid = int(rest[1]) if len(rest) > 1 else 1
+        except Exception:
+            return False
+    return False
+
+
+def _maybe_restart_hermes_gateway(hermes: str, *, no_restart: bool) -> None:
+    if no_restart:
+        print("• Hermes gateway restart skipped by --no-restart. Run it manually after setup if Hermes is already running.")
+        return
+    if _process_tree_contains_hermes():
+        print("• Hermes gateway restart skipped because this setup is running inside Hermes. Restart Hermes from an external shell after this command finishes.")
+        return
+    if _run_checked([hermes, "gateway", "restart"], "Hermes gateway restart", required=False):
+        print("✓ Hermes gateway restart requested")
+    else:
+        print("• Restart Hermes manually if it is already running: hermes gateway restart")
+
+
+def cmd_connect(args: argparse.Namespace) -> int:
+    client = args.client
+    try:
+        setup = _decode_setup_payload(args.setup)
+    except ValueError as e:
+        print(f"Invalid setup: {e}", file=sys.stderr)
+        return 2
+
+    current = env_file.read_env_file()
+    current["GETBASED_STACK_MANAGED"] = "1"
+    current["GETBASED_TOKEN"] = setup["token"]
+    current["GETBASED_AGENT_CONTEXT_KEY"] = setup["context_key"]
+    current["GETBASED_GATEWAY"] = setup["gateway"]
+    current.setdefault("LENS_URL", "http://127.0.0.1:8322")
+    path = env_file.write_env_file(current)
+    print(f"✓ Agent Access credentials stored in {path} (mode 0600)")
+
+    mcp_cmd = shutil.which("getbased-mcp") or "getbased-mcp"
+
+    if client == "hermes":
+        hermes = shutil.which("hermes")
+        if not hermes:
+            print("Hermes CLI not found on PATH. Install Hermes or paste `getbased-stack mcp-config hermes` manually.", file=sys.stderr)
+            return 1
+        add_cmd = [
+            hermes, "mcp", "add", "getbased",
+            "--command", mcp_cmd,
+            "--env", "GETBASED_STACK_MANAGED=1",
+        ]
+        if not _run_checked(add_cmd, "Hermes MCP registration", input_text="y\ny\n"):
+            return 1
+        print("✓ Hermes MCP server registered")
+        if _run_checked([hermes, "mcp", "test", "getbased"], "Hermes MCP test", required=False):
+            print("✓ Connection test passed")
+        else:
+            print("• Connection test skipped/failed; run `hermes mcp test getbased` after restarting Hermes.")
+        if not args.no_restart:
+            _maybe_restart_hermes_gateway(hermes, no_restart=args.no_restart)
+        else:
+            _maybe_restart_hermes_gateway(hermes, no_restart=True)
+        print("Done. Ask Hermes: “Read my getbased profile.”")
+        return 0
+
+    print(f"Stored Agent Access credentials. Generate/paste this client config next: getbased-stack mcp-config {client}")
+    return 0
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     try:
         import importlib.metadata as md
@@ -375,6 +515,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Which client to emit for.",
     )
 
+    pc = sub.add_parser("connect", help="Store an Agent Access setup code and configure a client.")
+    pc.add_argument(
+        "client",
+        choices=mcp_configs.SUPPORTED_CLIENTS,
+        help="Which client to configure.",
+    )
+    pc.add_argument(
+        "--setup",
+        required=True,
+        help="Private gbsetup_v1_... setup code copied from getbased Settings → Agent Access.",
+    )
+    pc.add_argument(
+        "--no-restart",
+        action="store_true",
+        help="Do not try to restart Hermes gateway after registering the MCP server.",
+    )
+
     sub.add_parser("version", help="Print installed package versions.")
 
     return p
@@ -387,6 +544,7 @@ COMMANDS = {
     "status": cmd_status,
     "set": cmd_set,
     "mcp-config": cmd_mcp_config,
+    "connect": cmd_connect,
     "version": cmd_version,
 }
 

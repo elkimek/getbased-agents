@@ -5,4 +5,4 @@ plus a small CLI that proxies to the real binaries. Everything
 interesting lives in the sibling repos.
 """
 
-__version__ = "0.5.4"
+__version__ = "0.5.5"

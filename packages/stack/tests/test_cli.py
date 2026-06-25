@@ -224,6 +224,94 @@ def test_mcp_config_unknown_client():
     assert rc != 0
 
 
+# ── connect ───────────────────────────────────────────────────────────
+
+
+def _setup_blob(token="tok_123", context_key="ctx_456", gateway="https://sync.getbased.health"):
+    import base64
+    import json
+
+    payload = json.dumps({
+        "version": 1,
+        "token": token,
+        "contextKey": context_key,
+        "gateway": gateway,
+    }, separators=(",", ":")).encode()
+    return "gbsetup_v1_" + base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def test_connect_hermes_setup_blob_stores_secrets_and_registers_mcp(stack_home, monkeypatch):
+    monkeypatch.setenv("GETBASED_STACK_ASSUME_HERMES_CHILD", "0")
+    calls = []
+    monkeypatch.setattr(cli.shutil, "which", lambda name: {
+        "getbased-mcp": "/usr/local/bin/getbased-mcp",
+        "hermes": "/usr/local/bin/hermes",
+    }.get(name))
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs.get("input")))
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+        return Result()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    rc, out, err = _run(["connect", "hermes", "--setup", _setup_blob()])
+
+    assert rc == 0, err
+    data = env_file.read_env_file()
+    assert data["GETBASED_STACK_MANAGED"] == "1"
+    assert data["GETBASED_TOKEN"] == "tok_123"
+    assert data["GETBASED_AGENT_CONTEXT_KEY"] == "ctx_456"
+    assert data["GETBASED_GATEWAY"] == "https://sync.getbased.health"
+    assert ([
+        "/usr/local/bin/hermes", "mcp", "add", "getbased",
+        "--command", "/usr/local/bin/getbased-mcp",
+        "--env", "GETBASED_STACK_MANAGED=1",
+    ], "y\ny\n") in calls
+    assert (["/usr/local/bin/hermes", "mcp", "test", "getbased"], None) in calls
+    assert (["/usr/local/bin/hermes", "gateway", "restart"], None) in calls
+    assert "Hermes MCP server registered" in out
+    assert "Connection test passed" in out
+    assert "tok_123" not in out
+    assert "ctx_456" not in out
+
+
+def test_connect_rejects_malformed_setup_blob(stack_home):
+    rc, out, err = _run(["connect", "hermes", "--setup", "not-a-setup-code"])
+    assert rc == 2
+    assert "Invalid setup" in err
+    assert env_file.read_env_file() == {}
+
+
+def test_connect_skips_gateway_restart_when_running_inside_hermes(stack_home, monkeypatch):
+    monkeypatch.setenv("GETBASED_STACK_ASSUME_HERMES_CHILD", "1")
+    calls = []
+    monkeypatch.setattr(cli.shutil, "which", lambda name: {
+        "getbased-mcp": "/usr/local/bin/getbased-mcp",
+        "hermes": "/usr/local/bin/hermes",
+    }.get(name))
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs.get("input")))
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+        return Result()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    rc, out, err = _run(["connect", "hermes", "--setup", _setup_blob()])
+
+    assert rc == 0, err
+    assert (["/usr/local/bin/hermes", "mcp", "test", "getbased"], None) in calls
+    assert all(cmd != ["/usr/local/bin/hermes", "gateway", "restart"] for cmd, _ in calls)
+    assert "restart skipped because this setup is running inside Hermes" in out
+
+
 # ── init (non-interactive via EOF on stdin) ───────────────────────────
 
 

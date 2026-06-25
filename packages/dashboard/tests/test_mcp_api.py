@@ -86,10 +86,9 @@ def test_config_claude_desktop_json_shape(client: TestClient) -> None:
     assert "mcpServers" in body
     entry = body["mcpServers"]["getbased"]
     assert entry["command"]  # something — path or bare name
-    assert entry["env"]["LENS_URL"] == "http://lens.test:8322"
-    # Token/key placeholders, not real values — user supplies these themselves
-    assert "<paste" in entry["env"]["GETBASED_TOKEN"]
-    assert "<paste" in entry["env"]["GETBASED_AGENT_CONTEXT_KEY"]
+    assert entry["env"] == {"GETBASED_STACK_MANAGED": "1"}
+    assert "GETBASED_TOKEN" not in entry["env"]
+    assert "GETBASED_AGENT_CONTEXT_KEY" not in entry["env"]
 
 
 @pytest.mark.parametrize("client_name", ["claude-code", "cursor", "cline"])
@@ -122,9 +121,9 @@ def test_config_openclaw_uses_nested_mcp_servers_shape(client: TestClient) -> No
     entry = body["mcp"]["servers"]["getbased"]
     assert entry["command"]
     assert entry["args"] == []
-    assert entry["env"]["LENS_URL"] == "http://lens.test:8322"
-    assert "<paste" in entry["env"]["GETBASED_TOKEN"]
-    assert "<paste" in entry["env"]["GETBASED_AGENT_CONTEXT_KEY"]
+    assert entry["env"] == {"GETBASED_STACK_MANAGED": "1"}
+    assert "GETBASED_TOKEN" not in entry["env"]
+    assert "GETBASED_AGENT_CONTEXT_KEY" not in entry["env"]
 
 
 def test_config_hermes_is_yaml_with_enabled_tools(client: TestClient) -> None:
@@ -139,11 +138,12 @@ def test_config_hermes_is_yaml_with_enabled_tools(client: TestClient) -> None:
     assert "enabled_tools:" in txt
     assert "- knowledge_search" in txt
     assert "- knowledge_list_libraries" in txt
-    # Env block — keys present, token/key are placeholders
-    assert "GETBASED_TOKEN:" in txt
-    assert "GETBASED_AGENT_CONTEXT_KEY:" in txt
-    assert "paste" in txt
-    assert "LENS_URL:" in txt
+    assert "- getbased_wearables_series" in txt
+    # Env block — stack-managed flag only; no secret placeholders in client config
+    assert 'GETBASED_STACK_MANAGED: "1"' in txt
+    assert "GETBASED_TOKEN:" not in txt
+    assert "GETBASED_AGENT_CONTEXT_KEY:" not in txt
+    assert "LENS_URL:" not in txt
 
 
 def test_config_unknown_client_rejected(client: TestClient) -> None:
