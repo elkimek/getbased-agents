@@ -10,14 +10,17 @@ failure. Args are never logged upstream so we don't have to strip them.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections import defaultdict
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
 
+from ..auth import require_auth as _require_auth
 from ..config import DashboardConfig
-from ..server import _require_auth
+
+log = logging.getLogger(__name__)
 
 
 def _cfg(request: Request) -> DashboardConfig:
@@ -139,10 +142,10 @@ def register(app: FastAPI) -> None:
         try:
             if cfg.activity_log.exists():
                 os.unlink(cfg.activity_log)
-        except OSError:
+        except OSError as e:
             # File may have been created by another process or removed in
             # a race; either way we want to return "nothing here" state.
-            pass
+            log.debug("Unable to clear activity log %s: %s", cfg.activity_log, e)
         return {
             "log_path": str(cfg.activity_log),
             "log_exists": False,

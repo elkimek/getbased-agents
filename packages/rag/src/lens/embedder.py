@@ -50,12 +50,12 @@ class Embedder(ABC):
     @abstractmethod
     def encode(self, texts: list[str]) -> list[list[float]]:
         """Encode a batch of texts into normalized vectors."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def dimension(self) -> int:
         """Return the embedding dimensionality."""
-        ...
+        raise NotImplementedError
 
     def info(self) -> dict:
         """Return a small dict describing this backend — which engine,
@@ -237,8 +237,8 @@ class OnnxEmbedder(Embedder):
                     pad_token = raw
                 elif isinstance(raw, dict):
                     pad_token = raw.get("content")
-            except (ValueError, _json.JSONDecodeError):
-                pass
+            except (ValueError, _json.JSONDecodeError) as e:
+                log.debug("Unable to read pad token config from %s: %s", cfg_path, e)
 
         # Fallback: probe the tokenizer for any of the usual suspects.
         if not pad_token:
@@ -435,8 +435,8 @@ class OnnxEmbedder(Embedder):
                 # cap"; treat anything absurd as 512 fallback.
                 if 32 <= ml <= 16384:
                     return ml
-            except (ValueError, _json.JSONDecodeError):
-                pass
+            except (ValueError, _json.JSONDecodeError) as e:
+                log.debug("Unable to read max-length config from %s: %s", cfg, e)
         return 8192 if "bge-m3" in self._model_name.lower() else 512
 
     def _detect_dimension(self) -> int:
@@ -506,8 +506,8 @@ class OnnxEmbedder(Embedder):
                 providers = self._session.get_providers()
                 if providers:
                     active = providers[0]
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                log.debug("Unable to inspect active ONNX providers: %s", e)
         return {
             "engine": "onnx",
             "model": self._model_name,
@@ -577,8 +577,8 @@ class LocalEmbedder(Embedder):
                 device = "cuda"
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
                 device = "mps"
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            log.debug("Unable to inspect torch device availability: %s", e)
         return {
             "engine": "pytorch",
             "model": self._model_name,
@@ -638,8 +638,8 @@ class CloudInferenceEmbedder(Embedder):
         host = ""
         try:
             host = urlparse(self._url).hostname or ""
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            log.debug("Unable to parse Qdrant Cloud host from %s: %s", self._url, e)
         return {
             "engine": "qdrant-cloud",
             "model": self._model_name,

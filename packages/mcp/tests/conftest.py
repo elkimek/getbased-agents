@@ -6,7 +6,6 @@ drift if either backend's response shape changes.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest

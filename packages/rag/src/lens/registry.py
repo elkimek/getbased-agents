@@ -23,8 +23,6 @@ import os
 import tempfile
 import time
 import uuid
-from pathlib import Path
-from typing import Optional
 
 from .config import LensConfig
 
@@ -90,14 +88,14 @@ class Registry:
                 f.flush()
                 try:
                     os.fsync(f.fileno())
-                except OSError:
-                    pass
+                except OSError as e:
+                    log.debug("Unable to fsync libraries registry temp file: %s", e)
             os.replace(tmp_name, self._path)
         except Exception:
             try:
                 os.unlink(tmp_name)
-            except OSError:
-                pass
+            except OSError as e:
+                log.debug("Unable to remove temporary libraries registry %s: %s", tmp_name, e)
             raise
 
     # ── Public surface ────────────────────────────────────────────────

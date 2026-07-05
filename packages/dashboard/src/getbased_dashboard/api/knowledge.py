@@ -16,7 +16,15 @@ import logging
 import os
 import re
 import tempfile
+from contextlib import suppress
 from pathlib import Path
+
+import httpx
+from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
+
+from ..auth import require_auth as _require_auth
+from ..config import DashboardConfig
 
 log = logging.getLogger(__name__)
 
@@ -33,12 +41,25 @@ def _validate_library_id(library_id: str) -> str:
         )
     return library_id
 
-import httpx
-from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
 
-from ..config import DashboardConfig
-from ..server import _require_auth
+def _validate_source_name(source: str) -> str:
+    """Validate a source id before forwarding it to rag.
+
+    The dashboard accepts source ids in its own ``/sources/{source:path}``
+    route for backward-compatible browser calls, but forwards the id to rag in
+    a JSON body so the upstream URL stays constant and cannot be reshaped by a
+    user-controlled path segment.
+    """
+    normalized = (source or "").replace("\\", "/")
+    parts = [p for p in normalized.split("/") if p]
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or "://" in normalized
+        or any(part == ".." for part in parts)
+    ):
+        raise HTTPException(status_code=400, detail="invalid source path")
+    return normalized
 
 _KNOWLEDGE_TIMEOUT = 30.0
 _INGEST_TIMEOUT = 300.0  # real-model ingest can run minutes on large files
@@ -166,7 +187,10 @@ def register(app: FastAPI) -> None:
 
     @router.delete("/sources/{source:path}")
     async def delete_source(request: Request, source: str):
-        return await _proxy_json(request, "DELETE", f"/sources/{source}")
+        source = _validate_source_name(source)
+        return await _proxy_json(
+            request, "POST", "/sources/delete", json_body={"source": source}
+        )
 
     @router.post("/ingest")
     async def ingest(
@@ -330,10 +354,8 @@ def register(app: FastAPI) -> None:
                 finally:
                     await client.aclose()
                     for fh in fhs:
-                        try:
+                        with suppress(Exception):
                             fh.close()
-                        except Exception:
-                            pass
                     _cleanup_tmpdir()
 
             return StreamingResponse(
@@ -369,10 +391,8 @@ def register(app: FastAPI) -> None:
                     )
             finally:
                 for fh in fhs:
-                    try:
+                    with suppress(Exception):
                         fh.close()
-                    except Exception:
-                        pass
 
             if r.status_code >= 400:
                 try:

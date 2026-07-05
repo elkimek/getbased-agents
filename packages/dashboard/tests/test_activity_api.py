@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 AUTH = {"Authorization": "Bearer test-dashboard-key"}
@@ -26,7 +25,8 @@ def test_activity_requires_auth(client: TestClient) -> None:
 
 
 def test_clear_requires_auth(client: TestClient) -> None:
-    assert client.delete("/api/activity").status_code == 401
+    response = client.delete("/api/activity")
+    assert response.status_code == 401
 
 
 # ─── Empty / missing log ─────────────────────────────────────────────

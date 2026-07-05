@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import os
 import secrets
+import logging
 from pathlib import Path
+
+log = logging.getLogger("lens.api_key")
 
 
 def get_or_create_api_key(key_file: Path) -> str:
@@ -24,8 +27,8 @@ def get_or_create_api_key(key_file: Path) -> str:
             key = key_file.read_text().strip()
             if key:
                 return key
-        except OSError:
-            pass
+        except OSError as e:
+            log.debug("Unable to read existing Lens API key file %s: %s", key_file, e)
 
     key_file.parent.mkdir(parents=True, exist_ok=True)
     key = secrets.token_urlsafe(32)
@@ -50,6 +53,6 @@ def load_api_key(key_file: Path) -> str | None:
         if key_file.exists():
             key = key_file.read_text().strip()
             return key if key else None
-    except OSError:
-        pass
+    except OSError as e:
+        log.debug("Unable to read Lens API key file %s: %s", key_file, e)
     return None

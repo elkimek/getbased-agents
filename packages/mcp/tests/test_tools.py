@@ -268,7 +268,6 @@ async def test_knowledge_search_happy(gm) -> None:
     assert route.called
     req = route.calls[0].request
     assert req.headers["Authorization"] == "Bearer test-lens-key"
-    import json
     body = json.loads(req.content)
     assert body == {"version": 1, "query": "vitamin D", "top_k": 2}
     # Response rendered
@@ -283,7 +282,6 @@ async def test_knowledge_search_clamps_n_results(gm) -> None:
     route = respx.post(f"{LENS_URL_PREFIX}/query").mock(return_value=Response(200, json={"chunks": []}))
     # n_results=99 → clamped to 10
     await gm.knowledge_search(query="x", n_results=99)
-    import json
     body = json.loads(route.calls[0].request.content)
     assert body["top_k"] == 10
     # n_results=0 → clamped to 1

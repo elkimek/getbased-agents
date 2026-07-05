@@ -419,8 +419,8 @@ async def _lens_call(method: str, path: str, json_body: dict | None = None) -> d
                 body = e.response.json()
                 if body.get("detail") == "Not Found":
                     return {"error": "unsupported_endpoint"}
-            except (json.JSONDecodeError, ValueError):
-                pass
+            except (json.JSONDecodeError, ValueError) as parse_error:
+                log.debug("Unable to parse Lens 404 response body: %s", parse_error)
         # Same rationale as _lens_request: truncate the body preview so
         # internal details don't end up in a cloud AI client's context.
         preview = (e.response.text or "")[:_UPSTREAM_ERROR_PREVIEW]

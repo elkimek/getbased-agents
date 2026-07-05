@@ -74,6 +74,10 @@ class LibraryRenameRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
 
 
+class SourceDeleteRequest(BaseModel):
+    source: str = Field(..., min_length=1, max_length=4096)
+
+
 def create_app(config: LensConfig) -> FastAPI:
     """Build the FastAPI app with config-driven dependencies."""
     config.ensure_dirs()
@@ -282,13 +286,8 @@ def create_app(config: LensConfig) -> FastAPI:
             log.exception("Stats failed")
             raise HTTPException(500, "Stats failed — see server logs")
 
-    @app.delete("/sources/{source:path}")
-    async def delete_source_endpoint(
-        source: str,
-        authorization: Optional[str] = Header(default=None),
-    ):
+    def _delete_source(source: str) -> dict:
         """Delete every chunk for a given source in the active library."""
-        require_auth(authorization)
         store = active_store()
         try:
             deleted = store.delete_by_source(source)
@@ -296,6 +295,27 @@ def create_app(config: LensConfig) -> FastAPI:
         except Exception:
             log.exception("Delete failed")
             raise HTTPException(500, "Delete failed — see server logs")
+
+    @app.post("/sources/delete")
+    async def delete_source_body_endpoint(
+        req: SourceDeleteRequest,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        """Delete a source via a fixed upstream path and JSON body.
+
+        Dashboard uses this route so browser-provided source names never become
+        part of the dashboard→rag request URL.
+        """
+        require_auth(authorization)
+        return _delete_source(req.source)
+
+    @app.delete("/sources/{source:path}")
+    async def delete_source_endpoint(
+        source: str,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        require_auth(authorization)
+        return _delete_source(source)
 
     @app.delete("/sources")
     async def clear_endpoint(authorization: Optional[str] = Header(default=None)):
@@ -668,7 +688,7 @@ def create_app(config: LensConfig) -> FastAPI:
                             break
                         await _asyncio.sleep(1.0)
                 except _asyncio.CancelledError:
-                    pass
+                    log.debug("Disconnect watcher cancelled")
 
             async def _ndjson_gen():
                 ingest_task = _asyncio.create_task(_run_ingest())
@@ -688,8 +708,12 @@ def create_app(config: LensConfig) -> FastAPI:
                     if not ingest_task.done():
                         try:
                             await _asyncio.wait_for(ingest_task, timeout=5.0)
-                        except (_asyncio.CancelledError, _asyncio.TimeoutError, Exception):
-                            pass
+                        except _asyncio.CancelledError:
+                            log.debug("Cancelled while waiting for ingest task cleanup")
+                        except _asyncio.TimeoutError:
+                            log.debug("Timed out waiting for ingest task cleanup")
+                        except Exception as e:  # noqa: BLE001
+                            log.debug("Ingest task cleanup failed: %s", e)
                     _cleanup_tmpdir()
 
             return StreamingResponse(

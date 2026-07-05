@@ -37,7 +37,7 @@ lens serve
 
 First start auto-generates an API key at the data dir (see below), prints the bind address, and lazy-loads the embedding model on the first query (~90 MB download for MiniLM).
 
-Copy the API key out when you need to configure a client:
+Create the API key file and show its path when you need to configure a client:
 
 ```bash
 lens key
@@ -46,8 +46,11 @@ lens key
 Smoke test:
 
 ```bash
+key_file="$(lens key | sed 's/^file: //')"
+LENS_API_KEY="$(tr -d '\n' < "$key_file")"
+
 curl -s http://127.0.0.1:8322/health
-curl -s -H "Authorization: Bearer $(lens key)" http://127.0.0.1:8322/info | jq
+curl -s -H "Authorization: Bearer ${LENS_API_KEY}" http://127.0.0.1:8322/info | jq
 ```
 
 Ingest a file or directory from the CLI:
@@ -60,7 +63,10 @@ lens stats
 Or over HTTP (what the dashboard + PWA use):
 
 ```bash
-curl -H "Authorization: Bearer $(lens key)" \
+key_file="$(lens key | sed 's/^file: //')"
+LENS_API_KEY="$(tr -d '\n' < "$key_file")"
+
+curl -H "Authorization: Bearer ${LENS_API_KEY}" \
   -F "files=@paper.pdf" -F "files=@notes.md" \
   http://127.0.0.1:8322/ingest
 ```
@@ -72,7 +78,10 @@ curl -H "Authorization: Bearer $(lens key)" \
 Every library is pinned to one embedding model at creation time — Qdrant collections are dimension-locked, so you can't swap models on an existing library without re-ingesting. Call `GET /models` for the curated list (MiniLM-L6-v2 · BGE-small/base/large-en · BGE-M3) with dims and download sizes, then pass `embedding_model` on create:
 
 ```bash
-curl -H "Authorization: Bearer $(lens key)" \
+key_file="$(lens key | sed 's/^file: //')"
+LENS_API_KEY="$(tr -d '\n' < "$key_file")"
+
+curl -H "Authorization: Bearer ${LENS_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"name":"Research","embedding_model":"BAAI/bge-m3"}' \
   http://127.0.0.1:8322/libraries
@@ -100,7 +109,7 @@ In the PWA: open **Knowledge Base**, choose **External server**, then enter:
 | Field | Value |
 |---|---|
 | URL | `http://127.0.0.1:8322` |
-| API key | output of `lens key` |
+| API key | value in the file printed by `lens key` |
 
 Click **Save**, then **Test connection**. `rag_ready: false` is expected before you ingest anything.
 
@@ -151,7 +160,7 @@ LENS_ONNX_PROVIDER=cuda lens serve
 
 ## HTTP API
 
-All endpoints except `/`, `/health` require `Authorization: Bearer <key>`.
+All endpoints except `/`, `/health` require `Authorization: Bearer ${LENS_API_KEY}`.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -174,7 +183,7 @@ All endpoints except `/`, `/health` require `Authorization: Bearer <key>`.
 ## Security notes
 
 - Default bind is `127.0.0.1` — queries never leak to the LAN unless you explicitly set `LENS_HOST=0.0.0.0`.
-- The API key file is mode `0600` and never exposed over HTTP. Use `lens key` locally to read it.
+- The API key file is mode `0600`; `lens key` shows the file path instead of printing the secret.
 - Bearer comparison uses `secrets.compare_digest` — constant-time, no timing-leak class of bug.
 - Upload paths are basename-sanitised server-side (so `../../etc/passwd` can't escape the ingest temp dir).
 - Zip uploads are zip-slip-guarded — each archive entry must resolve inside its own per-zip subdirectory AND inside the overall ingest root.
@@ -190,8 +199,8 @@ lens ingest <path>    Index files into the active library
 lens stats            List indexed sources + chunk counts
 lens delete <source>  Drop chunks belonging to one source
 lens clear            Wipe the active library
-lens info             Show config + API key
-lens key              Print the API key (creates one if missing)
+lens info             Show config + masked API-key fingerprint
+lens key              Show API key file path
 ```
 
 ---

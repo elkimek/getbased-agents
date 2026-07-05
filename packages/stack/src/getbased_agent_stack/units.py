@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 # Units this package ships. Order matters for start: rag first (dashboard
 # Wants=+After= rag), so systemctl picks the right order naturally anyway.

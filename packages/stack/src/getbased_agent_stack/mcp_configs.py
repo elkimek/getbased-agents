@@ -215,22 +215,19 @@ def emit_hermes(resolver: Callable[[str], "str | None"] = shutil.which) -> str:
 
 def emit(client: str, resolver: Callable[[str], "str | None"] = shutil.which) -> str:
     """Dispatch to the right emitter. Raises ValueError on unknown client."""
-    match client:
-        case "claude-desktop":
-            return emit_claude_desktop(resolver)
-        case "claude-code":
-            return emit_claude_code(resolver)
-        case "cursor":
-            return emit_cursor(resolver)
-        case "cline":
-            return emit_cline(resolver)
-        case "hermes":
-            return emit_hermes(resolver)
-        case "openclaw":
-            return emit_openclaw(resolver)
-        case "codex":
-            return emit_codex(resolver)
-        case _:
-            raise ValueError(
-                f"unknown client {client!r}. Supported: {', '.join(SUPPORTED_CLIENTS)}"
-            )
+    emitters = {
+        "claude-desktop": emit_claude_desktop,
+        "claude-code": emit_claude_code,
+        "cursor": emit_cursor,
+        "cline": emit_cline,
+        "hermes": emit_hermes,
+        "openclaw": emit_openclaw,
+        "codex": emit_codex,
+    }
+    try:
+        emitter = emitters[client]
+    except KeyError as e:
+        raise ValueError(
+            f"unknown client {client!r}. Supported: {', '.join(SUPPORTED_CLIENTS)}"
+        ) from e
+    return emitter(resolver)

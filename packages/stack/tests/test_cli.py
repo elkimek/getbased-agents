@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from getbased_agent_stack import cli, env_file, units
-from getbased_agent_stack.units import CommandResult, UnitManager
+from getbased_agent_stack.units import CommandResult
 
 
 @pytest.fixture
@@ -351,6 +351,14 @@ def test_connect_skips_gateway_restart_when_running_inside_hermes(stack_home, mo
 # ── init (non-interactive via EOF on stdin) ───────────────────────────
 
 
+def test_init_requires_setup_or_local_only_on_clean_interactive_run(stack_home, fake_shell):
+    rc, out, _ = _run(["init"])
+    assert rc == 2
+    assert "--setup" in out
+    assert "--local-only" in out
+    assert env_file.read_env_file() == {}
+
+
 def test_init_idempotent_with_empty_input(stack_home, fake_shell, monkeypatch):
     """Feed EOF for every prompt: init should complete using defaults
     without crashing. This validates the wizard is non-blocking when
@@ -359,7 +367,7 @@ def test_init_idempotent_with_empty_input(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    rc, out, _ = _run(["init"])
+    rc, out, _ = _run(["init", "--local-only"])
     assert rc == 0
     # Env file created
     path = env_file.env_file_path()
@@ -373,32 +381,46 @@ def test_init_idempotent_with_empty_input(stack_home, fake_shell, monkeypatch):
 
 
 def test_init_preserves_existing_token(stack_home, fake_shell, monkeypatch):
-    """Re-running init with EOF on token prompt must not wipe the stored
-    value. The wizard uses the previous token as default."""
+    """Re-running init must not wipe an explicitly stored token."""
     env_file.write_env_file(
         {"GETBASED_TOKEN": "preserved_value", "GETBASED_STACK_MANAGED": "1"}
     )
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     assert env_file.read_env_file()["GETBASED_TOKEN"] == "preserved_value"
 
 
-def test_init_accepts_new_token(stack_home, fake_shell, monkeypatch):
+def test_init_accepts_setup_blob(stack_home, fake_shell, monkeypatch):
+    """First-run init can store the private Agent Access setup code without
+    prompting for raw token/context-key values separately."""
     inputs = iter([""])  # accept install prompt with default
     monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs, ""))
-    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "brand_new_token")
+    monkeypatch.setattr(
+        "getpass.getpass",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("getpass called")),
+    )
 
-    _run(["init"])
-    assert env_file.read_env_file()["GETBASED_TOKEN"] == "brand_new_token"
+    rc, out, err = _run([
+        "init",
+        "--setup",
+        _setup_blob(token="brand_new_token", context_key="ctx_new", gateway="https://sync.example"),
+    ])
+    assert rc == 0, err
+    data = env_file.read_env_file()
+    assert data["GETBASED_TOKEN"] == "brand_new_token"
+    assert data["GETBASED_AGENT_CONTEXT_KEY"] == "ctx_new"
+    assert data["GETBASED_GATEWAY"] == "https://sync.example"
+    assert "brand_new_token" not in out
+    assert "ctx_new" not in out
 
 
 def test_init_generates_api_key(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     key_file = Path(env_file.read_env_file()["LENS_API_KEY_FILE"])
     assert key_file.exists()
     key = key_file.read_text().strip()
@@ -419,15 +441,14 @@ def test_init_reuses_existing_api_key(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     assert key_path.read_text().strip() == "preexisting_key"
 
 
-def test_init_yes_flag_skips_all_prompts(stack_home, fake_shell, monkeypatch):
+def test_init_yes_requires_setup_or_local_only_without_prompts(stack_home, fake_shell, monkeypatch):
     """`init --yes` must not call input() or getpass() at all. Scripted
-    installers (curl | bash) can't service prompts and the EOF fallback
-    triggers a Python getpass echo warning that pollutes output.
-    Strict assertion: any prompt call fails the test."""
+    installers (curl | bash) cannot service prompts, so a clean full setup
+    needs --setup; local-only installs must say so explicitly."""
     def _forbid_input(*a, **kw):
         raise AssertionError("input() called under --yes")
 
@@ -438,24 +459,25 @@ def test_init_yes_flag_skips_all_prompts(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("getpass.getpass", _forbid_getpass)
 
     rc, out, _ = _run(["init", "--yes"])
-    assert rc == 0
+    assert rc == 2
     # Banner reflects the mode so the user sees what happened
     assert "non-interactive" in out.lower()
-    assert "GETBASED_TOKEN and GETBASED_AGENT_CONTEXT_KEY" in out
-    assert "getbased-stack set GETBASED_AGENT_CONTEXT_KEY" in out
-    # Env file + units still land
-    assert env_file.env_file_path().exists()
-    assert (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()
+    assert "--setup" in out
+    assert "--local-only" in out
+    # A successful-looking first-run install without credentials would leave
+    # Agent Access broken, so --yes must stop before writing env/units unless
+    # the caller explicitly opts into --local-only.
+    assert not env_file.env_file_path().exists()
+    assert not (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()
 
 
-def test_init_yes_installs_units_without_asking(stack_home, fake_shell, monkeypatch):
-    """Default for the install-units prompt is Yes, so --yes must also
-    install + start. If this regressed to skip, install.sh would
-    silently leave services off."""
+def test_init_yes_local_only_installs_units_without_asking(stack_home, fake_shell, monkeypatch):
+    """When the caller explicitly chooses local-only, --yes must install
+    + start without prompting."""
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init", "--yes"])
+    _run(["init", "--yes", "--local-only"])
     # UnitManager.install() writes service files under XDG_CONFIG_HOME
     assert (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()
     assert (stack_home / "config" / "systemd" / "user" / "getbased-dashboard.service").exists()
@@ -471,7 +493,7 @@ def test_init_yes_survives_missing_systemctl(stack_home, fake_shell, monkeypatch
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    rc, out, _ = _run(["init", "--yes"])
+    rc, out, _ = _run(["init", "--yes", "--local-only"])
     assert rc == 0
     # Unit files still written (for re-run on a systemd-enabled host)
     assert (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()
@@ -484,7 +506,11 @@ def test_init_yes_preserves_existing_token(stack_home, fake_shell, monkeypatch):
     """Non-interactive mode must not nuke a previously-saved token —
     it takes the 'keep current' default, same as pressing Enter."""
     env_file.write_env_file(
-        {"GETBASED_TOKEN": "keep_me", "GETBASED_STACK_MANAGED": "1"}
+        {
+            "GETBASED_TOKEN": "keep_me",
+            "GETBASED_AGENT_CONTEXT_KEY": "ctx_keep",
+            "GETBASED_STACK_MANAGED": "1",
+        }
     )
     # No input/getpass expected, but stub defensively in case a future
     # code path adds an unguarded prompt — test still catches it.
@@ -501,10 +527,10 @@ def test_init_is_reentrant(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     key1 = (stack_home / "data" / "getbased" / "lens" / "api_key").read_text()
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     key2 = (stack_home / "data" / "getbased" / "lens" / "api_key").read_text()
 
     assert key1 == key2, "init must not rotate an existing API key"

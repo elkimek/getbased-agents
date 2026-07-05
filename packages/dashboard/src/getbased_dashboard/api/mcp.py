@@ -25,8 +25,8 @@ log = logging.getLogger(__name__)
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 
 from .. import __version__ as _PKG_VERSION
+from ..auth import require_auth as _require_auth
 from ..config import DashboardConfig
-from ..server import _require_auth
 
 
 def _cfg(request: Request) -> DashboardConfig:
@@ -304,8 +304,8 @@ async def _stdio_probe(cfg: DashboardConfig, timeout_s: float = 10.0) -> dict:
         try:
             if proc.stdin and not proc.stdin.is_closing():
                 proc.stdin.close()
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            log.debug("Failed to close MCP stdin during cleanup: %s", e)
         if proc.returncode is None:
             try:
                 proc.terminate()
@@ -329,10 +329,11 @@ async def _stdio_probe(cfg: DashboardConfig, timeout_s: float = 10.0) -> dict:
             )
         except asyncio.TimeoutError:
             return {"ok": False, "error": f"MCP didn't respond within {timeout_s}s"}
-        except json.JSONDecodeError as e:
-            return {"ok": False, "error": f"MCP returned invalid JSON: {e}"}
+        except json.JSONDecodeError:
+            return {"ok": False, "error": "MCP returned invalid JSON"}
         except RuntimeError as e:
-            return {"ok": False, "error": str(e)}
+            log.warning("MCP probe runtime failure: %s", e)
+            return {"ok": False, "error": "MCP closed stdout before responding"}
         except Exception as e:
             # Log full detail server-side for triage; return only the
             # exception class to the dashboard. Stack-trace strings can leak

@@ -1,7 +1,7 @@
 """getbased-stack — orchestration CLI.
 
 Subcommands:
-  init           — interactive one-time setup: token, API key, systemd units
+  init           — interactive one-time setup: API key, systemd units
   install        — install/refresh the bundled systemd user units
   uninstall      — stop, disable, and remove the systemd units
   status         — show env file, units, and linger state
@@ -93,6 +93,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     # for scripted installs (curl | bash) where stdin is unavailable and
     # the EOF-returns-default path still triggers a getpass echo warning.
     non_interactive = getattr(args, "yes", False)
+    local_only = getattr(args, "local_only", False)
 
     print("getbased-stack init — one-time setup")
     if non_interactive:
@@ -110,21 +111,43 @@ def cmd_init(args: argparse.Namespace) -> int:
     masked = "****" + current_token[-4:] if current_token else "(unset)"
     key_masked = "****" + current_context_key[-4:] if current_context_key else "(unset)"
     print(f"[1/4] Agent Access token + context key (token: {masked}, key: {key_masked})")
-    if non_interactive:
-        token = current_token
-        context_key = current_context_key
-        print("  keeping current values (set with `getbased-stack set GETBASED_TOKEN=…` and `getbased-stack set GETBASED_AGENT_CONTEXT_KEY=…` later).")
+    token = current_token
+    context_key = current_context_key
+    gateway = existing.get("GETBASED_GATEWAY", "")
+    setup_code = (getattr(args, "setup", "") or "").strip()
+    if setup_code:
+        try:
+            setup_values = _decode_setup_payload(setup_code)
+        except ValueError as e:
+            print(f"Invalid setup: {e}", file=sys.stderr)
+            return 2
+        token = setup_values["token"]
+        context_key = setup_values["context_key"]
+        gateway = setup_values["gateway"]
+        print("  setup code accepted — Agent Access credentials will be stored.")
+    elif token and context_key:
+        print("  existing Agent Access credentials found — keeping them.")
+    elif local_only:
+        print(
+            "  no complete Agent Access credentials yet — continuing local-only. "
+            "Blood-work Agent Access tools stay disabled until you run "
+            "`getbased-stack connect hermes --setup gbsetup_v1_…` or rerun "
+            "`getbased-stack init --setup gbsetup_v1_…`."
+        )
+    elif non_interactive:
+        print(
+            "  Agent Access setup code required for non-interactive first-run setup. "
+            "Pass `--setup gbsetup_v1_…`, or add `--local-only` to install only "
+            "rag/dashboard without Agent Access."
+        )
+        return 2
     else:
-        token = _prompt(
-            "Paste GETBASED_TOKEN (press Enter to keep current / skip)",
-            default=current_token,
-            secret=True,
+        print(
+            "  Agent Access setup code required for full first-run setup. Rerun "
+            "with `getbased-stack init --setup gbsetup_v1_…`, or pass "
+            "`--local-only` if you only want rag/dashboard without Agent Access."
         )
-        context_key = _prompt(
-            "Paste GETBASED_AGENT_CONTEXT_KEY (press Enter to keep current / skip)",
-            default=current_context_key,
-            secret=True,
-        )
+        return 2
 
     # 2. API key
     key_path = Path(existing.get("LENS_API_KEY_FILE", str(_default_api_key_file())))
@@ -144,6 +167,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         merged["GETBASED_TOKEN"] = token
     if context_key:
         merged["GETBASED_AGENT_CONTEXT_KEY"] = context_key
+    if gateway:
+        merged["GETBASED_GATEWAY"] = gateway
     merged["LENS_API_KEY_FILE"] = str(key_path)
     merged.setdefault("LENS_URL", "http://127.0.0.1:8322")
     path = env_file.write_env_file(merged)
@@ -166,17 +191,20 @@ def cmd_init(args: argparse.Namespace) -> int:
     _print_linger_hint(strict=False)
 
     # 6. MCP config pointers
-    print("\nNext steps for Agent Access:")
-    print("  1. In getbased, enable Cross-device Sync and Agent Access.")
-    print("  2. Copy both values from Settings → Agent Access:")
-    print("     GETBASED_TOKEN and GETBASED_AGENT_CONTEXT_KEY.")
-    print("  3. Save them here with:")
-    print("     getbased-stack set GETBASED_TOKEN=...")
-    print("     getbased-stack set GETBASED_AGENT_CONTEXT_KEY=...")
-
-    print("\nConfigure your MCP client(s):")
-    for client in mcp_configs.SUPPORTED_CLIENTS:
-        print(f"  getbased-stack mcp-config {client}")
+    if token and context_key:
+        print("\nAgent Access credentials are configured ✓")
+        print("  Generate or refresh client config with:")
+        for client in mcp_configs.SUPPORTED_CLIENTS:
+            print(f"    getbased-stack mcp-config {client}")
+    else:
+        print("\nNext steps for Agent Access:")
+        print("  1. In getbased, enable Cross-device Sync and Agent Access.")
+        print("  2. Copy the private setup code from Settings → Agent Access.")
+        print("  3. Store it here and register your MCP client with:")
+        print("     getbased-stack connect hermes --setup gbsetup_v1_...")
+        print("  4. Or generate a manual client config with:")
+        for client in mcp_configs.SUPPORTED_CLIENTS:
+            print(f"     getbased-stack mcp-config {client}")
 
     return 0
 
@@ -483,13 +511,23 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command")
 
     pinit = sub.add_parser(
-        "init", help="Interactive one-time setup (token, API key, units)."
+        "init", help="Interactive one-time setup (API key, units)."
     )
     pinit.add_argument(
         "-y",
         "--yes",
         action="store_true",
         help="Non-interactive: take defaults on every prompt. Use for scripted installs.",
+    )
+    pinit.add_argument(
+        "--setup",
+        default="",
+        help="Private gbsetup_v1_... setup code from getbased Settings → Agent Access.",
+    )
+    pinit.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Install rag/dashboard without Agent Access credentials; run connect later.",
     )
 
     pi = sub.add_parser("install", help="Install + start the systemd user units.")

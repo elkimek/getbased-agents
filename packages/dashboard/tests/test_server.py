@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from getbased_dashboard.config import DashboardConfig, _resolve_key_file
@@ -95,7 +94,7 @@ def test_reveal_api_key_returns_plaintext_when_authed(
     """The UI's show/copy buttons hit this endpoint to reveal the
     bearer token. The caller is already authenticated with the same
     key, so returning it isn't an escalation — just saves them a
-    terminal round-trip to run `lens key`."""
+    terminal round-trip to open the key file. """
     r = client.get(
         "/api/auth/api-key",
         headers={"Authorization": "Bearer test-dashboard-key"},

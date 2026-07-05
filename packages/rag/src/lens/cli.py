@@ -3,7 +3,7 @@
   lens serve            Start the HTTP server (default if no command)
   lens ingest <path>    Index files into the local store
   lens info             Show config + key + status
-  lens key              Print the API key (creates one if missing)
+  lens key              Show API key file path
 
 Configuration comes from environment variables — see config.py for the full list.
 The Tauri desktop wrapper sets LENS_HOST, LENS_PORT, LENS_DATA_DIR,
@@ -207,9 +207,10 @@ def info():
 
 @app.command()
 def key():
-    """Print the API key (generates one on first invocation)."""
+    """Show the API key file path, creating the key if missing."""
     config = LensConfig.from_env()
-    print(get_or_create_api_key(config.api_key_file))
+    get_or_create_api_key(config.api_key_file)
+    print(f"file: {config.api_key_file}")
 
 
 def main():
