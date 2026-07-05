@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pdf = ["pypdf>=3.9"]
+pdf = ["pypdf>=6.13.3"]
 docx = ["python-docx>=1.0"]
 # ONNX acceleration. `full` now includes it by default — the install
 # is small (~200 MB vs the old ~2 GB) because we load pre-exported
@@ -36,7 +36,7 @@ docx = ["python-docx>=1.0"]
 # already in core gets you the default LocalEmbedder path — ~2-3x
 # slower than ONNX but zero extra config.
 full = [
-    "pypdf>=3.9",
+    "pypdf>=6.13.3",
     "python-docx>=1.0",
     "onnxruntime>=1.17",
     "huggingface-hub>=0.20",
