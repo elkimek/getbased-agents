@@ -112,11 +112,32 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"[1/4] Agent Access token + context key (token: {masked}, key: {key_masked})")
     token = current_token
     context_key = current_context_key
-    print(
-        "  keeping current values. Add or rotate with "
-        "`getbased-stack set GETBASED_TOKEN=…` and "
-        "`getbased-stack set GETBASED_AGENT_CONTEXT_KEY=…`."
-    )
+    gateway = existing.get("GETBASED_GATEWAY", "")
+    setup_code = (getattr(args, "setup", "") or "").strip()
+    if setup_code:
+        try:
+            setup_values = _decode_setup_payload(setup_code)
+        except ValueError as e:
+            print(f"Invalid setup: {e}", file=sys.stderr)
+            return 2
+        token = setup_values["token"]
+        context_key = setup_values["context_key"]
+        gateway = setup_values["gateway"]
+        print("  setup code accepted — Agent Access credentials will be stored.")
+    elif token and context_key:
+        print("  existing Agent Access credentials found — keeping them.")
+    elif non_interactive:
+        print(
+            "  no complete Agent Access credentials yet. Add them later with "
+            "`getbased-stack connect hermes --setup gbsetup_v1_…` or rerun "
+            "`getbased-stack init --setup gbsetup_v1_…`."
+        )
+    else:
+        print(
+            "  no complete Agent Access credentials yet. Paste the private setup "
+            "code with `getbased-stack init --setup gbsetup_v1_…` or "
+            "`getbased-stack connect hermes --setup gbsetup_v1_…`."
+        )
 
     # 2. API key
     key_path = Path(existing.get("LENS_API_KEY_FILE", str(_default_api_key_file())))
@@ -136,6 +157,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         merged["GETBASED_TOKEN"] = token
     if context_key:
         merged["GETBASED_AGENT_CONTEXT_KEY"] = context_key
+    if gateway:
+        merged["GETBASED_GATEWAY"] = gateway
     merged["LENS_API_KEY_FILE"] = str(key_path)
     merged.setdefault("LENS_URL", "http://127.0.0.1:8322")
     path = env_file.write_env_file(merged)
@@ -158,17 +181,20 @@ def cmd_init(args: argparse.Namespace) -> int:
     _print_linger_hint(strict=False)
 
     # 6. MCP config pointers
-    print("\nNext steps for Agent Access:")
-    print("  1. In getbased, enable Cross-device Sync and Agent Access.")
-    print("  2. Copy both values from Settings → Agent Access:")
-    print("     GETBASED_TOKEN and GETBASED_AGENT_CONTEXT_KEY.")
-    print("  3. Save them here with:")
-    print("     getbased-stack set GETBASED_TOKEN=...")
-    print("     getbased-stack set GETBASED_AGENT_CONTEXT_KEY=...")
-
-    print("\nConfigure your MCP client(s):")
-    for client in mcp_configs.SUPPORTED_CLIENTS:
-        print(f"  getbased-stack mcp-config {client}")
+    if token and context_key:
+        print("\nAgent Access credentials are configured ✓")
+        print("  Generate or refresh client config with:")
+        for client in mcp_configs.SUPPORTED_CLIENTS:
+            print(f"    getbased-stack mcp-config {client}")
+    else:
+        print("\nNext steps for Agent Access:")
+        print("  1. In getbased, enable Cross-device Sync and Agent Access.")
+        print("  2. Copy the private setup code from Settings → Agent Access.")
+        print("  3. Store it here and register your MCP client with:")
+        print("     getbased-stack connect hermes --setup gbsetup_v1_...")
+        print("  4. Or generate a manual client config with:")
+        for client in mcp_configs.SUPPORTED_CLIENTS:
+            print(f"     getbased-stack mcp-config {client}")
 
     return 0
 
@@ -482,6 +508,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         help="Non-interactive: take defaults on every prompt. Use for scripted installs.",
+    )
+    pinit.add_argument(
+        "--setup",
+        default="",
+        help="Private gbsetup_v1_... setup code from getbased Settings → Agent Access.",
     )
 
     pi = sub.add_parser("install", help="Install + start the systemd user units.")

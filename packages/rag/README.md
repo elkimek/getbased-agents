@@ -46,8 +46,11 @@ lens key
 Smoke test:
 
 ```bash
+key_file="$(lens key | sed 's/^file: //')"
+LENS_API_KEY="$(tr -d '\n' < "$key_file")"
+
 curl -s http://127.0.0.1:8322/health
-curl -s -H "Authorization: Bearer $(lens key)" http://127.0.0.1:8322/info | jq
+curl -s -H "Authorization: Bearer ${LENS_API_KEY}" http://127.0.0.1:8322/info | jq
 ```
 
 Ingest a file or directory from the CLI:
@@ -60,7 +63,10 @@ lens stats
 Or over HTTP (what the dashboard + PWA use):
 
 ```bash
-curl -H "Authorization: Bearer $(lens key)" \
+key_file="$(lens key | sed 's/^file: //')"
+LENS_API_KEY="$(tr -d '\n' < "$key_file")"
+
+curl -H "Authorization: Bearer ${LENS_API_KEY}" \
   -F "files=@paper.pdf" -F "files=@notes.md" \
   http://127.0.0.1:8322/ingest
 ```
@@ -72,7 +78,10 @@ curl -H "Authorization: Bearer $(lens key)" \
 Every library is pinned to one embedding model at creation time — Qdrant collections are dimension-locked, so you can't swap models on an existing library without re-ingesting. Call `GET /models` for the curated list (MiniLM-L6-v2 · BGE-small/base/large-en · BGE-M3) with dims and download sizes, then pass `embedding_model` on create:
 
 ```bash
-curl -H "Authorization: Bearer $(lens key)" \
+key_file="$(lens key | sed 's/^file: //')"
+LENS_API_KEY="$(tr -d '\n' < "$key_file")"
+
+curl -H "Authorization: Bearer ${LENS_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"name":"Research","embedding_model":"BAAI/bge-m3"}' \
   http://127.0.0.1:8322/libraries
@@ -151,7 +160,7 @@ LENS_ONNX_PROVIDER=cuda lens serve
 
 ## HTTP API
 
-All endpoints except `/`, `/health` require `Authorization: Bearer <key>`.
+All endpoints except `/`, `/health` require `Authorization: Bearer ${LENS_API_KEY}`.
 
 | Method | Path | Purpose |
 |---|---|---|

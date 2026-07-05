@@ -384,9 +384,9 @@ def test_init_preserves_existing_token(stack_home, fake_shell, monkeypatch):
     assert env_file.read_env_file()["GETBASED_TOKEN"] == "preserved_value"
 
 
-def test_init_does_not_capture_new_token(stack_home, fake_shell, monkeypatch):
-    """Agent Access secrets are added explicitly via `getbased-stack set`;
-    init no longer prompts for and stores new secret values."""
+def test_init_accepts_setup_blob(stack_home, fake_shell, monkeypatch):
+    """First-run init can store the private Agent Access setup code without
+    prompting for raw token/context-key values separately."""
     inputs = iter([""])  # accept install prompt with default
     monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs, ""))
     monkeypatch.setattr(
@@ -394,8 +394,18 @@ def test_init_does_not_capture_new_token(stack_home, fake_shell, monkeypatch):
         lambda *a, **kw: (_ for _ in ()).throw(AssertionError("getpass called")),
     )
 
-    _run(["init"])
-    assert "GETBASED_TOKEN" not in env_file.read_env_file()
+    rc, out, err = _run([
+        "init",
+        "--setup",
+        _setup_blob(token="brand_new_token", context_key="ctx_new", gateway="https://sync.example"),
+    ])
+    assert rc == 0, err
+    data = env_file.read_env_file()
+    assert data["GETBASED_TOKEN"] == "brand_new_token"
+    assert data["GETBASED_AGENT_CONTEXT_KEY"] == "ctx_new"
+    assert data["GETBASED_GATEWAY"] == "https://sync.example"
+    assert "brand_new_token" not in out
+    assert "ctx_new" not in out
 
 
 def test_init_generates_api_key(stack_home, fake_shell, monkeypatch):
@@ -445,8 +455,8 @@ def test_init_yes_flag_skips_all_prompts(stack_home, fake_shell, monkeypatch):
     assert rc == 0
     # Banner reflects the mode so the user sees what happened
     assert "non-interactive" in out.lower()
-    assert "GETBASED_TOKEN and GETBASED_AGENT_CONTEXT_KEY" in out
-    assert "getbased-stack set GETBASED_AGENT_CONTEXT_KEY" in out
+    assert "gbsetup_v1_" in out
+    assert "getbased-stack connect hermes --setup" in out
     # Env file + units still land
     assert env_file.env_file_path().exists()
     assert (stack_home / "config" / "systemd" / "user" / "getbased-rag.service").exists()
