@@ -12,7 +12,7 @@ Linux, one command:
 curl -sSL https://getbased.health/install.sh | bash
 ```
 
-Runs end-to-end: installs `getbased-agent-stack[full]` via whichever of `uv` or `pipx` is available, exposes sibling binaries, runs `getbased-stack init --yes`, and starts the knowledge server + dashboard as systemd user services. [Read the script first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious.
+Runs end-to-end: installs `getbased-agent-stack[full]` via whichever of `uv` or `pipx` is available, exposes sibling binaries, runs a non-interactive local-only init, and starts the knowledge server + dashboard as systemd user services. [Read the script first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious.
 
 If you are connecting a private getbased profile, copy the command from **Settings → Agent Access** in the app. It uses the same installer and then runs `getbased-stack connect` for the selected client:
 
@@ -63,7 +63,7 @@ getbased-stack init
 Non-interactive (for scripted installs and curl | bash; `install.sh` uses this):
 
 ```bash
-getbased-stack init --yes
+getbased-stack init --yes --local-only
 ```
 
 The wizard (~30 seconds):
@@ -157,7 +157,7 @@ The dashboard is likewise stateless — it proxies rag for Knowledge operations,
 | 0.1.x | ≥0.2.0 | ≥0.1.0 | — | v1 (multi-library) |
 | 0.2.x | ≥0.2.2 | ≥0.6.0 | ≥0.5.0 | v1 (+ streaming ingest, per-library models) |
 | 0.4.x | ≥0.2.3 | ≥0.7.1 | ≥0.6.1 | v1 (+ shared env file, `getbased-stack init`, systemd units) |
-| 0.5.x | ≥0.2.6 | ≥0.7.3 | ≥0.6.5 | v1 (+ `getbased-stack connect`, multi-client setup targets) |
+| 0.5.x | ≥0.2.7 | ≥0.7.4 | ≥0.6.6 | v1 (+ `getbased-stack connect`, multi-client setup targets; explicit local-only scripted init) |
 
 Bump the meta's major when sibling protocols break; bump siblings freely for normal features.
 

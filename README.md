@@ -31,7 +31,7 @@ Linux public install:
 curl -sSL https://getbased.health/install.sh | bash
 ```
 
-The script auto-detects `uv` or `pipx` (install either one first if you have neither), installs `getbased-agent-stack[full]` with sibling binaries exposed, runs `getbased-stack init --yes`, and starts `getbased-rag` + `getbased-dashboard` as systemd user services. [Read it first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious. Verify the published hash with `curl -sSL https://getbased.health/install.sh.sha256 | sha256sum -c`.
+The script auto-detects `uv` or `pipx` (install either one first if you have neither), installs `getbased-agent-stack[full]` with sibling binaries exposed, runs a non-interactive local-only init, and starts `getbased-rag` + `getbased-dashboard` as systemd user services. [Read it first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you're cautious. Verify the published hash with `curl -sSL https://getbased.health/install.sh.sha256 | sha256sum -c`.
 
 Private Agent Access setup is copied from getbased itself and looks like this:
 
@@ -77,9 +77,8 @@ Manual setup:
 
 ```bash
 pipx install --include-deps "getbased-agent-stack[full]"
-getbased-stack init --yes                  # creates the env file, API key, and systemd units where supported
-getbased-stack set GETBASED_TOKEN=...      # from getbased → Settings → Agent Access
-getbased-stack set GETBASED_AGENT_CONTEXT_KEY=...
+getbased-stack init --yes --local-only     # creates the env file, API key, and systemd units where supported
+getbased-stack connect hermes --setup gbsetup_v1_...  # from getbased → Settings → Agent Access
 getbased-stack mcp-config claude-desktop   # paste the snippet into your MCP client
 ```
 
