@@ -10,10 +10,8 @@ these silently corrupts embeddings for someone's knowledge base.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from lens.embedder import OnnxEmbedder, _ONNX_REPO_MAP

@@ -13,44 +13,22 @@ from __future__ import annotations
 
 import logging
 import platform as _platform
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__ as _PKG_VERSION
+from .auth import require_auth as _require_auth
 from .config import DashboardConfig
 
 logger = logging.getLogger("getbased_dashboard")
 
 _WEB_DIR = Path(__file__).parent / "web"
-
-
-def _require_auth(request: Request, config: DashboardConfig) -> None:
-    """Bearer check — same key rag + mcp use. Matches against the file
-    on disk, not a cached copy, so rotating the key doesn't require a
-    dashboard restart. Uses secrets.compare_digest to avoid timing-based
-    leakage — matches the pattern rag already uses."""
-    key = config.read_api_key()
-    if not key:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "No API key found. Start getbased-rag to generate one, "
-                f"or set LENS_API_KEY_FILE. Expected: {config.api_key_file}"
-            ),
-        )
-    header = request.headers.get("Authorization", "")
-    if not header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Bearer token")
-    token = header[len("Bearer ") :].strip()
-    if not secrets.compare_digest(token, key):
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 def create_app(config: DashboardConfig | None = None) -> FastAPI:

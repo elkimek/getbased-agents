@@ -6,11 +6,6 @@ is contacted — these tests run on a dev laptop, CI, Windows, anywhere.
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Callable
-
-import pytest
-
 from getbased_agent_stack import units
 from getbased_agent_stack.units import CommandResult, SERVICE_NAMES, UnitManager
 
@@ -230,7 +225,7 @@ def test_uninstall_sequence(tmp_path):
 def test_uninstall_noop_when_nothing_installed(tmp_path):
     shell = FakeShell()
     mgr = UnitManager(unit_dir=tmp_path, shell=shell)
-    log = mgr.uninstall()
+    mgr.uninstall()
     # Disable is still attempted (safe) but no daemon-reload because no files removed
     reloads = [c for c in shell.calls if c == ["systemctl", "--user", "daemon-reload"]]
     assert reloads == []

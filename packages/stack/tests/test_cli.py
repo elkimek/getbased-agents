@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from getbased_agent_stack import cli, env_file, units
-from getbased_agent_stack.units import CommandResult, UnitManager
+from getbased_agent_stack.units import CommandResult
 
 
 @pytest.fixture
@@ -373,8 +373,7 @@ def test_init_idempotent_with_empty_input(stack_home, fake_shell, monkeypatch):
 
 
 def test_init_preserves_existing_token(stack_home, fake_shell, monkeypatch):
-    """Re-running init with EOF on token prompt must not wipe the stored
-    value. The wizard uses the previous token as default."""
+    """Re-running init must not wipe an explicitly stored token."""
     env_file.write_env_file(
         {"GETBASED_TOKEN": "preserved_value", "GETBASED_STACK_MANAGED": "1"}
     )
@@ -385,13 +384,18 @@ def test_init_preserves_existing_token(stack_home, fake_shell, monkeypatch):
     assert env_file.read_env_file()["GETBASED_TOKEN"] == "preserved_value"
 
 
-def test_init_accepts_new_token(stack_home, fake_shell, monkeypatch):
+def test_init_does_not_capture_new_token(stack_home, fake_shell, monkeypatch):
+    """Agent Access secrets are added explicitly via `getbased-stack set`;
+    init no longer prompts for and stores new secret values."""
     inputs = iter([""])  # accept install prompt with default
     monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs, ""))
-    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "brand_new_token")
+    monkeypatch.setattr(
+        "getpass.getpass",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("getpass called")),
+    )
 
     _run(["init"])
-    assert env_file.read_env_file()["GETBASED_TOKEN"] == "brand_new_token"
+    assert "GETBASED_TOKEN" not in env_file.read_env_file()
 
 
 def test_init_generates_api_key(stack_home, fake_shell, monkeypatch):

@@ -37,7 +37,7 @@ lens serve
 
 First start auto-generates an API key at the data dir (see below), prints the bind address, and lazy-loads the embedding model on the first query (~90 MB download for MiniLM).
 
-Copy the API key out when you need to configure a client:
+Create the API key file and show its path when you need to configure a client:
 
 ```bash
 lens key
@@ -100,7 +100,7 @@ In the PWA: open **Knowledge Base**, choose **External server**, then enter:
 | Field | Value |
 |---|---|
 | URL | `http://127.0.0.1:8322` |
-| API key | output of `lens key` |
+| API key | value in the file printed by `lens key` |
 
 Click **Save**, then **Test connection**. `rag_ready: false` is expected before you ingest anything.
 
@@ -174,7 +174,7 @@ All endpoints except `/`, `/health` require `Authorization: Bearer <key>`.
 ## Security notes
 
 - Default bind is `127.0.0.1` — queries never leak to the LAN unless you explicitly set `LENS_HOST=0.0.0.0`.
-- The API key file is mode `0600` and never exposed over HTTP. Use `lens key` locally to read it.
+- The API key file is mode `0600`; `lens key` shows the file path instead of printing the secret.
 - Bearer comparison uses `secrets.compare_digest` — constant-time, no timing-leak class of bug.
 - Upload paths are basename-sanitised server-side (so `../../etc/passwd` can't escape the ingest temp dir).
 - Zip uploads are zip-slip-guarded — each archive entry must resolve inside its own per-zip subdirectory AND inside the overall ingest root.
@@ -190,8 +190,8 @@ lens ingest <path>    Index files into the active library
 lens stats            List indexed sources + chunk counts
 lens delete <source>  Drop chunks belonging to one source
 lens clear            Wipe the active library
-lens info             Show config + API key
-lens key              Print the API key (creates one if missing)
+lens info             Show config + masked API-key fingerprint
+lens key              Show API key file path
 ```
 
 ---

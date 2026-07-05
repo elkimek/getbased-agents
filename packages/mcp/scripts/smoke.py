@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from functools import partial
 from typing import Awaitable, Callable
 
 # Make the sibling module importable without packaging.
@@ -104,16 +105,16 @@ async def main() -> int:
     print()
 
     print("Blood-work tools")
-    await _run("getbased_list_profiles", lambda: gm.getbased_list_profiles(), gateway_ok, gateway_why, counters)
-    await _run("getbased_lab_context",   lambda: gm.getbased_lab_context(),   gateway_ok, gateway_why, counters)
-    await _run("getbased_section (index)", lambda: gm.getbased_section(),     gateway_ok, gateway_why, counters)
+    await _run("getbased_list_profiles", gm.getbased_list_profiles, gateway_ok, gateway_why, counters)
+    await _run("getbased_lab_context", gm.getbased_lab_context, gateway_ok, gateway_why, counters)
+    await _run("getbased_section (index)", gm.getbased_section, gateway_ok, gateway_why, counters)
 
     print()
     print("Knowledge-base tools")
-    await _run("getbased_lens_config",       lambda: gm.getbased_lens_config(),    lens_ok, lens_why, counters)
-    await _run("knowledge_list_libraries",   lambda: gm.knowledge_list_libraries(), lens_ok, lens_why, counters)
-    await _run("knowledge_stats",            lambda: gm.knowledge_stats(),         lens_ok, lens_why, counters)
-    await _run("knowledge_search (smoke)",   lambda: gm.knowledge_search(query="health", n_results=1), lens_ok, lens_why, counters)
+    await _run("getbased_lens_config", gm.getbased_lens_config, lens_ok, lens_why, counters)
+    await _run("knowledge_list_libraries", gm.knowledge_list_libraries, lens_ok, lens_why, counters)
+    await _run("knowledge_stats", gm.knowledge_stats, lens_ok, lens_why, counters)
+    await _run("knowledge_search (smoke)", partial(gm.knowledge_search, query="health", n_results=1), lens_ok, lens_why, counters)
 
     # knowledge_activate_library requires knowing a valid library ID. Pull
     # one from the list-libraries result instead of hardcoding — this tests
@@ -126,7 +127,7 @@ async def main() -> int:
             if target:
                 await _run(
                     f"knowledge_activate_library({target})",
-                    lambda: gm.knowledge_activate_library(library_id=target),
+                    partial(gm.knowledge_activate_library, library_id=target),
                     True, "", counters,
                 )
             else:

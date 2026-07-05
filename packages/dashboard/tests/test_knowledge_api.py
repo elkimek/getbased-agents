@@ -5,7 +5,6 @@ the browser unchanged (modulo detail normalisation)."""
 
 from __future__ import annotations
 
-import pytest
 import respx
 from fastapi.testclient import TestClient
 from httpx import ConnectError, Response
@@ -137,15 +136,19 @@ def test_stats_forwards(client: TestClient) -> None:
 
 
 @respx.mock
-def test_delete_source_preserves_path(client: TestClient) -> None:
-    """Source names can contain slashes (nested paths). The `:path`
-    converter means everything after /sources/ goes upstream verbatim."""
-    route = respx.delete(f"{RAG_BASE}/sources/docs/paper.pdf").mock(
+def test_delete_source_preserves_source_body(client: TestClient) -> None:
+    """Source names can contain slashes (nested paths), but the upstream
+    rag request uses a fixed URL and carries the source id in JSON."""
+    route = respx.post(f"{RAG_BASE}/sources/delete").mock(
         return_value=Response(200, json={"deleted_chunks": 5})
     )
     r = client.delete("/api/knowledge/sources/docs/paper.pdf", headers=AUTH)
     assert r.status_code == 200
     assert route.called
+    import json as _json
+
+    body = _json.loads(route.calls[0].request.content)
+    assert body == {"source": "docs/paper.pdf"}
 
 
 # ─── Error propagation ───────────────────────────────────────────────

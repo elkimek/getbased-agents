@@ -1,7 +1,7 @@
 """getbased-stack — orchestration CLI.
 
 Subcommands:
-  init           — interactive one-time setup: token, API key, systemd units
+  init           — interactive one-time setup: API key, systemd units
   install        — install/refresh the bundled systemd user units
   uninstall      — stop, disable, and remove the systemd units
   status         — show env file, units, and linger state
@@ -110,21 +110,13 @@ def cmd_init(args: argparse.Namespace) -> int:
     masked = "****" + current_token[-4:] if current_token else "(unset)"
     key_masked = "****" + current_context_key[-4:] if current_context_key else "(unset)"
     print(f"[1/4] Agent Access token + context key (token: {masked}, key: {key_masked})")
-    if non_interactive:
-        token = current_token
-        context_key = current_context_key
-        print("  keeping current values (set with `getbased-stack set GETBASED_TOKEN=…` and `getbased-stack set GETBASED_AGENT_CONTEXT_KEY=…` later).")
-    else:
-        token = _prompt(
-            "Paste GETBASED_TOKEN (press Enter to keep current / skip)",
-            default=current_token,
-            secret=True,
-        )
-        context_key = _prompt(
-            "Paste GETBASED_AGENT_CONTEXT_KEY (press Enter to keep current / skip)",
-            default=current_context_key,
-            secret=True,
-        )
+    token = current_token
+    context_key = current_context_key
+    print(
+        "  keeping current values. Add or rotate with "
+        "`getbased-stack set GETBASED_TOKEN=…` and "
+        "`getbased-stack set GETBASED_AGENT_CONTEXT_KEY=…`."
+    )
 
     # 2. API key
     key_path = Path(existing.get("LENS_API_KEY_FILE", str(_default_api_key_file())))
@@ -483,7 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command")
 
     pinit = sub.add_parser(
-        "init", help="Interactive one-time setup (token, API key, units)."
+        "init", help="Interactive one-time setup (API key, units)."
     )
     pinit.add_argument(
         "-y",
