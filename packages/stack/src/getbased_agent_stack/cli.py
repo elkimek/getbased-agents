@@ -127,13 +127,20 @@ def cmd_init(args: argparse.Namespace) -> int:
         print("  setup code accepted — Agent Access credentials will be stored.")
     elif token and context_key:
         print("  existing Agent Access credentials found — keeping them.")
-    elif non_interactive or local_only:
+    elif local_only:
         print(
             "  no complete Agent Access credentials yet — continuing local-only. "
             "Blood-work Agent Access tools stay disabled until you run "
             "`getbased-stack connect hermes --setup gbsetup_v1_…` or rerun "
             "`getbased-stack init --setup gbsetup_v1_…`."
         )
+    elif non_interactive:
+        print(
+            "  Agent Access setup code required for non-interactive first-run setup. "
+            "Pass `--setup gbsetup_v1_…`, or add `--local-only` to install only "
+            "rag/dashboard without Agent Access."
+        )
+        return 2
     else:
         print(
             "  Agent Access setup code required for full first-run setup. Rerun "
