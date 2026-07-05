@@ -93,6 +93,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     # for scripted installs (curl | bash) where stdin is unavailable and
     # the EOF-returns-default path still triggers a getpass echo warning.
     non_interactive = getattr(args, "yes", False)
+    local_only = getattr(args, "local_only", False)
 
     print("getbased-stack init — one-time setup")
     if non_interactive:
@@ -126,18 +127,20 @@ def cmd_init(args: argparse.Namespace) -> int:
         print("  setup code accepted — Agent Access credentials will be stored.")
     elif token and context_key:
         print("  existing Agent Access credentials found — keeping them.")
-    elif non_interactive:
+    elif non_interactive or local_only:
         print(
-            "  no complete Agent Access credentials yet. Add them later with "
+            "  no complete Agent Access credentials yet — continuing local-only. "
+            "Blood-work Agent Access tools stay disabled until you run "
             "`getbased-stack connect hermes --setup gbsetup_v1_…` or rerun "
             "`getbased-stack init --setup gbsetup_v1_…`."
         )
     else:
         print(
-            "  no complete Agent Access credentials yet. Paste the private setup "
-            "code with `getbased-stack init --setup gbsetup_v1_…` or "
-            "`getbased-stack connect hermes --setup gbsetup_v1_…`."
+            "  Agent Access setup code required for full first-run setup. Rerun "
+            "with `getbased-stack init --setup gbsetup_v1_…`, or pass "
+            "`--local-only` if you only want rag/dashboard without Agent Access."
         )
+        return 2
 
     # 2. API key
     key_path = Path(existing.get("LENS_API_KEY_FILE", str(_default_api_key_file())))
@@ -513,6 +516,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--setup",
         default="",
         help="Private gbsetup_v1_... setup code from getbased Settings → Agent Access.",
+    )
+    pinit.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Install rag/dashboard without Agent Access credentials; run connect later.",
     )
 
     pi = sub.add_parser("install", help="Install + start the systemd user units.")

@@ -351,6 +351,14 @@ def test_connect_skips_gateway_restart_when_running_inside_hermes(stack_home, mo
 # ── init (non-interactive via EOF on stdin) ───────────────────────────
 
 
+def test_init_requires_setup_or_local_only_on_clean_interactive_run(stack_home, fake_shell):
+    rc, out, _ = _run(["init"])
+    assert rc == 2
+    assert "--setup" in out
+    assert "--local-only" in out
+    assert env_file.read_env_file() == {}
+
+
 def test_init_idempotent_with_empty_input(stack_home, fake_shell, monkeypatch):
     """Feed EOF for every prompt: init should complete using defaults
     without crashing. This validates the wizard is non-blocking when
@@ -359,7 +367,7 @@ def test_init_idempotent_with_empty_input(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    rc, out, _ = _run(["init"])
+    rc, out, _ = _run(["init", "--local-only"])
     assert rc == 0
     # Env file created
     path = env_file.env_file_path()
@@ -380,7 +388,7 @@ def test_init_preserves_existing_token(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     assert env_file.read_env_file()["GETBASED_TOKEN"] == "preserved_value"
 
 
@@ -412,7 +420,7 @@ def test_init_generates_api_key(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     key_file = Path(env_file.read_env_file()["LENS_API_KEY_FILE"])
     assert key_file.exists()
     key = key_file.read_text().strip()
@@ -433,7 +441,7 @@ def test_init_reuses_existing_api_key(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     assert key_path.read_text().strip() == "preexisting_key"
 
 
@@ -515,10 +523,10 @@ def test_init_is_reentrant(stack_home, fake_shell, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "")
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "")
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     key1 = (stack_home / "data" / "getbased" / "lens" / "api_key").read_text()
 
-    _run(["init"])
+    _run(["init", "--local-only"])
     key2 = (stack_home / "data" / "getbased" / "lens" / "api_key").read_text()
 
     assert key1 == key2, "init must not rotate an existing API key"
