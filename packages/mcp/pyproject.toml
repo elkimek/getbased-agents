@@ -11,7 +11,7 @@ license = "AGPL-3.0-or-later"
 requires-python = ">=3.10"
 dependencies = [
     # MCP 2 removed mcp.server.fastmcp; keep the v1 SDK until this adapter migrates.
-    "mcp>=1.28.1,<2",
+    "mcp>=1.28.1,<3",
     "httpx>=0.27",
     "cryptography>=50.0.0",
 ]
