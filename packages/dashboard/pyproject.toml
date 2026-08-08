@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-dashboard"
-version = "0.6.6"
+version = "0.6.7"
 description = "Web dashboard for getbased-agents — manage knowledge libraries, generate MCP client configs, inspect agent activity"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -15,7 +15,7 @@ dependencies = [
     "httpx>=0.27",
     "typer>=0.12",
     "python-multipart>=0.0.31",
-    "getbased-mcp>=0.2.7",
+    "getbased-mcp>=0.2.8",
 ]
 
 [project.optional-dependencies]
