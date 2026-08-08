@@ -153,6 +153,24 @@ def mcp_env(seeded_lens: dict, monkeypatch: pytest.MonkeyPatch):
 
 # ── Tests ────────────────────────────────────────────────────────────
 
+def test_pdf_ingest_dependency_round_trip(tmp_path: Path) -> None:
+    """Exercise the optional PDF parser pinned by the full stack extra.
+
+    Dependency-only upgrades used to pass the core RAG tests without ever
+    importing pypdf.  Keep a small end-to-end smoke test here so a future
+    parser update cannot silently break the full installation profile.
+    """
+    from lens.ingest import _read_text
+    from pypdf import PdfWriter
+
+    pdf_path = tmp_path / "blank.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.write(pdf_path)
+
+    assert _read_text(pdf_path) == ""
+
+
 @pytest.mark.timeout(180)
 def test_full_knowledge_tool_chain(mcp_env) -> None:
     """Run every knowledge-* MCP tool against the real Lens and verify the
