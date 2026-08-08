@@ -157,7 +157,7 @@ The dashboard is likewise stateless — it proxies rag for Knowledge operations,
 | 0.1.x | ≥0.2.0 | ≥0.1.0 | — | v1 (multi-library) |
 | 0.2.x | ≥0.2.2 | ≥0.6.0 | ≥0.5.0 | v1 (+ streaming ingest, per-library models) |
 | 0.4.x | ≥0.2.3 | ≥0.7.1 | ≥0.6.1 | v1 (+ shared env file, `getbased-stack init`, systemd units) |
-| 0.5.x | ≥0.2.8 | ≥0.7.5 | ≥0.6.7 | v1 (+ `getbased-stack connect`, multi-client setup targets; explicit local-only scripted init) |
+| 0.5.x | ≥0.2.9 | ≥0.7.5 | ≥0.6.8 | v1 (+ `getbased-stack connect`, multi-client setup targets; explicit local-only scripted init) |
 
 Bump the meta's major when sibling protocols break; bump siblings freely for normal features.
 
