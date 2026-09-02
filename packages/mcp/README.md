@@ -9,13 +9,14 @@ An [MCP](https://modelcontextprotocol.io) server that exposes getbased health co
 ```
 getbased (browser)
   ├── your data, your mnemonic
-  ├── generates a read-only relay token
+  ├── generates an Agent Access relay token
   ├── generates a separate Agent Context encryption key
   ├── encrypts the rendered agent context with that context key
   └── pushes ciphertext to sync gateway on every save
 
-Context gateway (sync.getbased.health/api/context)
-  └── stores encrypted context behind token auth; it cannot read the plaintext
+Context gateway (sync.getbased.health/api/*)
+  ├── stores encrypted context behind token auth
+  └── queues encrypted action proposals; it cannot read either plaintext
 
 Local knowledge server (localhost, optional)
   ├── Vector database with embedded chunks
@@ -24,16 +25,18 @@ Local knowledge server (localhost, optional)
 
 This MCP Server (on your machine)
   ├── fetches health context from the context gateway
+  ├── encrypts narrow typed action proposals for browser review
   ├── queries the local knowledge server for knowledge-base searches (optional)
   └── exposes everything as tools to any MCP client
 ```
 
-Your mnemonic never leaves your browser. The gateway receives only an encrypted agent-context envelope; this MCP decrypts it locally with `GETBASED_AGENT_CONTEXT_KEY` and exposes the same summary text the getbased AI chat uses. `GETBASED_TOKEN` is only the relay bearer token.
+Your mnemonic never leaves your browser. The gateway receives only encrypted envelopes. This MCP decrypts Agent Context locally and can submit a `sun.session.log` proposal encrypted with the same dedicated key. The MCP schema exposes that exact action and argument shape rather than an open-ended JSON object. Proposal IDs are derived from their random encryption IV, so caller-controlled action text cannot leak through the clear queue identifier. The proposal cannot mutate getbased: the browser validates profile, capability, expiry, schema, and replay state, then waits for explicit user approval.
 
 ## Tools
 
 | Tool | Description |
 |---|---|
+| `getbased_propose_action` | Encrypt and submit a typed `sun.session.log` proposal to the selected profile. The browser must validate and the user must explicitly Apply it before anything changes. |
 | `getbased_lab_context` | Full lab summary with biomarkers, context cards, supplements, goals. Pass `profile` to target a specific profile. |
 | `getbased_section` | Get a specific section (e.g. hormones, lipids) or list all available sections |
 | `getbased_list_profiles` | List available profiles |
@@ -42,6 +45,20 @@ Your mnemonic never leaves your browser. The gateway receives only an encrypted 
 | `knowledge_activate_library` | Switch the active library — subsequent searches target the new one until switched again |
 | `knowledge_stats` | Per-source chunk counts for the active library — useful for diagnosing missing results |
 | `getbased_lens_config` | Show RAG endpoint config for getbased's Knowledge Base (External server) |
+
+### getbased_propose_action
+
+The first write-capable lane is deliberately narrow and proposal-only:
+
+```text
+getbased_propose_action(
+  action_id="sun.session.log",
+  arguments={"durationMinutes": 60, "notes": "Sunbathing"},
+  profile="default"
+)
+```
+
+The tool returns a proposal ID, not an execution result. getbased shows the decrypted proposal under **Manage → Context → Agent proposals**. Only the user's **Apply** click reaches the existing sunlight-session persistence path; **Dismiss** changes nothing.
 
 ### getbased_section
 
@@ -116,7 +133,7 @@ The setup payload is private. Paste it only into a terminal you control.
 
 If you are not using `getbased-stack connect`, open **Settings → Agent Access** and copy both values:
 
-- **Read-only token** → `GETBASED_TOKEN` for relay authorization
+- **Agent Access token** → `GETBASED_TOKEN` for context reads and encrypted proposal submission
 - **Context encryption key** → `GETBASED_AGENT_CONTEXT_KEY` for local decryption
 
 ### Set up a local knowledge server (optional, for `knowledge_search`)
@@ -195,6 +212,7 @@ Ask about your labs in any connected conversation:
 | `GETBASED_TOKEN` | Yes | Read-only bearer token from getbased Settings → Agent Access; authorizes fetches from the context gateway |
 | `GETBASED_AGENT_CONTEXT_KEY` | Yes for encrypted Agent Access payloads | Context encryption key from getbased Settings → Agent Access; decrypts the relay payload locally in this MCP |
 | `GETBASED_GATEWAY` | No | Context gateway URL (default: `https://sync.getbased.health`) |
+| `GETBASED_AGENT_PROPOSAL_GATEWAY` | No | Proposal relay URL when proposal transport is isolated from the context gateway (defaults to `GETBASED_GATEWAY`) |
 | `LENS_URL` | No | Local knowledge server URL (default: `http://localhost:8322`). Overrides `LENS_PORT` |
 | `LENS_PORT` | No | Local knowledge server port, only used to build default `LENS_URL` (default: `8322`) |
 | `LENS_API_KEY_FILE` | No | Path to the knowledge server API key file. Default: `$XDG_DATA_HOME/getbased/lens/api_key` (getbased-rag's canonical location). If that file doesn't exist but the legacy `~/.hermes/rag/lens_api_key` does, the legacy path is used instead; upgrades from standalone `getbased-mcp` ≤ 0.1.0 keep working without config changes. |

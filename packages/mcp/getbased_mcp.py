@@ -20,6 +20,8 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Literal
 
 import httpx
 from cryptography.exceptions import InvalidTag
@@ -27,6 +29,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from mcp.server.fastmcp import FastMCP
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, WithJsonSchema, field_validator
 
 
 def _maybe_load_user_env() -> None:
@@ -72,8 +75,33 @@ mcp = FastMCP("getbased")
 TOKEN = os.environ.get("GETBASED_TOKEN", "")
 AGENT_CONTEXT_KEY = os.environ.get("GETBASED_AGENT_CONTEXT_KEY", "")
 GATEWAY = os.environ.get("GETBASED_GATEWAY", "https://sync.getbased.health")
+AGENT_PROPOSAL_GATEWAY = os.environ.get("GETBASED_AGENT_PROPOSAL_GATEWAY", GATEWAY)
 AGENT_CONTEXT_V1_KDF_INFO = b"getbased-agent-access-context-v1"
 AGENT_CONTEXT_AAD_PREFIX = b"getbased-agent-context-v2"
+AGENT_PROPOSAL_AAD_PREFIX = b"getbased-agent-proposal-v1"
+
+
+class SunSessionLogArguments(BaseModel):
+    """Exact MCP-visible argument contract for the first proposal action."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, hide_input_in_errors=True)
+
+    duration_minutes: float = Field(alias="durationMinutes", gt=0, le=1440)
+    ended_at: AwareDatetime | None = Field(default=None, alias="endedAt")
+    notes: str = Field(default="", max_length=500)
+
+    @field_validator("duration_minutes", mode="before")
+    @classmethod
+    def reject_non_numeric_json_types(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("durationMinutes must be a JSON number")
+        return value
+
+
+SunSessionLogArgumentsInput = Annotated[
+    dict[str, object],
+    WithJsonSchema(SunSessionLogArguments.model_json_schema(by_alias=True)),
+]
 
 LENS_URL = os.environ.get("LENS_URL", f"http://localhost:{os.environ.get('LENS_PORT', '8322')}")
 
@@ -216,6 +244,78 @@ def _decode_agent_context_key(value: str) -> bytes:
 
 def _agent_context_key_id(raw_key: bytes) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(raw_key).digest()[:12]).decode("ascii").rstrip("=")
+
+
+def _iso_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _gateway_api_url(gateway: str, route: str) -> str:
+    base = gateway.rstrip("/")
+    api_base = base if base.endswith("/api") else f"{base}/api"
+    return f"{api_base}/{route.lstrip('/')}"
+
+
+def _validate_proposal_arguments(action_id: str, arguments: object) -> tuple[dict | None, str]:
+    if action_id != "sun.session.log":
+        return None, f"{action_id or '(empty)'} is not an allowed proposal action"
+    if isinstance(arguments, SunSessionLogArguments):
+        arguments = arguments.model_dump(by_alias=True, exclude_none=True, mode="json")
+    if not isinstance(arguments, dict):
+        return None, "arguments must be an object"
+    allowed = {"durationMinutes", "endedAt", "notes"}
+    duration = arguments.get("durationMinutes")
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not (0 < duration <= 1440):
+        return None, "durationMinutes must be greater than 0 and at most 1440"
+    unknown = sorted(set(arguments) - allowed)
+    if unknown:
+        return None, f"Unknown field: {unknown[0]}"
+    normalized: dict[str, object] = {"durationMinutes": duration}
+    if "endedAt" in arguments:
+        ended_at = arguments["endedAt"]
+        if not isinstance(ended_at, str) or not ended_at:
+            return None, "endedAt must be an ISO-8601 timestamp"
+        try:
+            parsed_ended_at = datetime.fromisoformat(ended_at.replace("Z", "+00:00"))
+        except ValueError:
+            return None, "endedAt must be an ISO-8601 timestamp"
+        if parsed_ended_at.tzinfo is None or parsed_ended_at.utcoffset() is None:
+            return None, "endedAt must include a timezone offset"
+        normalized["endedAt"] = _iso_utc(parsed_ended_at)
+    if "notes" in arguments:
+        notes = arguments["notes"]
+        if not isinstance(notes, str) or len(notes) > 500:
+            return None, "notes must be text with at most 500 characters"
+        if notes:
+            normalized["notes"] = notes
+    return normalized, ""
+
+
+def _proposal_id_from_iv(iv: bytes) -> str:
+    digest = hashlib.sha256(iv).digest()[:18]
+    return f"proposal_{base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')}"
+
+
+def _encrypt_agent_proposal(proposal: dict, raw_key: bytes, iv: bytes) -> dict:
+    proposal_id = proposal["id"]
+    if len(iv) != 12 or proposal_id != _proposal_id_from_iv(iv):
+        raise ValueError("proposal id must be derived from its 12-byte IV")
+    aad = AGENT_PROPOSAL_AAD_PREFIX + b":" + proposal_id.encode("utf-8")
+    plaintext = json.dumps(
+        {"version": 1, "proposal": proposal},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    ciphertext = AESGCM(raw_key).encrypt(iv, plaintext, aad)
+    return {
+        "version": 1,
+        "alg": "AES-256-GCM",
+        "keyDerivation": "raw-256-bit-key",
+        "keyId": _agent_context_key_id(raw_key),
+        "proposalId": proposal_id,
+        "iv": base64.b64encode(iv).decode("ascii"),
+        "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+    }
 
 
 def _b64decode_required(value: object, field: str) -> bytes:
@@ -434,6 +534,100 @@ async def _lens_call(method: str, path: str, json_body: dict | None = None) -> d
 # ═══════════════════════════════════════════════════════════════════════
 # TOOLS — Blood work data
 # ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+@_instrumented("getbased_propose_action")
+async def getbased_propose_action(
+    action_id: Literal["sun.session.log"],
+    arguments: SunSessionLogArgumentsInput,
+    profile: Annotated[str, Field(pattern=r"^(?:[A-Za-z0-9_-]+)?$")] = "",
+    expires_in_minutes: Annotated[StrictInt, Field(ge=5, le=60)] = 30,
+) -> str:
+    """Propose a typed getbased action for the user to review in the app.
+
+    This tool never applies a health-data mutation. It encrypts the proposal
+    locally, sends only ciphertext to the relay, and waits for the user to
+    explicitly Apply or Dismiss it inside getbased.
+
+    Currently allowed action:
+      sun.session.log — arguments: durationMinutes (required, 0..1440),
+      endedAt (optional ISO-8601 timestamp), notes (optional, max 500 chars).
+
+    Args:
+        action_id: exact semantic action id; currently "sun.session.log".
+        arguments: typed action arguments object. Arbitrary patches are rejected.
+        profile: target getbased profile id. Omit to use the active relay profile.
+        expires_in_minutes: review window, from 5 to 60 minutes.
+    """
+    if not TOKEN:
+        return "Error: GETBASED_TOKEN not set"
+    try:
+        raw_key = _decode_agent_context_key(AGENT_CONTEXT_KEY)
+    except ValueError as e:
+        return f"Error: {e}"
+    normalized, validation_error = _validate_proposal_arguments(action_id, arguments)
+    if validation_error:
+        return f"Error: {validation_error}"
+    if normalized is None:
+        return "Error: proposal arguments are invalid"
+    if isinstance(expires_in_minutes, bool) or not isinstance(expires_in_minutes, int) \
+            or not (5 <= expires_in_minutes <= 60):
+        return "Error: expires_in_minutes must be an integer from 5 to 60"
+    if profile and not re.fullmatch(r"[A-Za-z0-9_-]+", profile):
+        return "Error: profile must contain only letters, numbers, underscores, or hyphens"
+
+    profile_id = profile
+    if not profile_id:
+        context_metadata = await _fetch_context(decrypt_context=False)
+        if "error" in context_metadata:
+            return f"Error: {context_metadata['error']}"
+        profile_id = str(context_metadata.get("profileId") or "default")
+
+    issued = datetime.now(timezone.utc)
+    issued_at = _iso_utc(issued)
+    if "endedAt" not in normalized:
+        normalized["endedAt"] = issued_at
+    proposal_iv = os.urandom(12)
+    proposal_id = _proposal_id_from_iv(proposal_iv)
+    proposal = {
+        "id": proposal_id,
+        "actionId": action_id,
+        "arguments": normalized,
+        "profileId": profile_id,
+        "capability": "sun.sessions:write:propose",
+        "source": {"type": "external-agent", "client": "getbased-mcp"},
+        "issuedAt": issued_at,
+        "expiresAt": _iso_utc(issued + timedelta(minutes=expires_in_minutes)),
+    }
+    envelope = _encrypt_agent_proposal(proposal, raw_key, proposal_iv)
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                _gateway_api_url(AGENT_PROPOSAL_GATEWAY, "agent-proposals"),
+                headers={"Authorization": f"Bearer {TOKEN}"},
+                json={"envelope": envelope},
+            )
+        if response.status_code not in (200, 201):
+            try:
+                error = response.json().get("error", "request_rejected")
+            except (json.JSONDecodeError, ValueError):
+                error = "request_rejected"
+            safe_error = error if isinstance(error, str) and re.fullmatch(r"[a-z0-9_:-]{1,80}", error) else "request_rejected"
+            return f"Error: proposal relay refused the request ({response.status_code}: {safe_error})"
+        try:
+            acceptance = response.json()
+        except (json.JSONDecodeError, ValueError):
+            acceptance = None
+        if not isinstance(acceptance, dict) or acceptance.get("ok") is not True \
+                or acceptance.get("proposalId") != proposal_id:
+            return "Error: proposal relay returned an invalid acceptance response"
+    except httpx.RequestError as error:
+        return f"Error: Failed to reach proposal relay: {type(error).__name__}"
+
+    return (
+        f"Proposal {proposal_id} submitted and waiting for explicit approval in getbased. "
+        "No health data was changed."
+    )
 
 @mcp.tool()
 @_instrumented("getbased_lab_context")
