@@ -146,6 +146,7 @@ context gateway   getbased-rag  ◀────────┘     getbased-mcp
 The MCP holds no persistent state; it's a thin translator between MCP tool calls and two HTTP backends:
 
 - `sync.getbased.health/api/context` — encrypted lab context pushed by your PWA session (authorized by Agent Access token, decrypted locally with Agent Context key)
+- `sync.getbased.health/api/agent-proposals` — ciphertext-only proposal queue; the browser decrypts and requires explicit approval before an app-owned action runs
 - `localhost:8322` (getbased-rag) — your local research library
 
 The dashboard is likewise stateless — it proxies rag for Knowledge operations, imports `getbased_mcp` to introspect env/config, and spawns the MCP binary on demand to verify it works.
@@ -158,6 +159,7 @@ The dashboard is likewise stateless — it proxies rag for Knowledge operations,
 | 0.2.x | ≥0.2.2 | ≥0.6.0 | ≥0.5.0 | v1 (+ streaming ingest, per-library models) |
 | 0.4.x | ≥0.2.3 | ≥0.7.1 | ≥0.6.1 | v1 (+ shared env file, `getbased-stack init`, systemd units) |
 | 0.5.x | ≥0.2.9 | ≥0.7.5 | ≥0.6.8 | v1 (+ `getbased-stack connect`, multi-client setup targets; explicit local-only scripted init) |
+| 0.6.x | ≥0.3.0 | ≥0.7.5 | ≥0.6.8 | v1 (+ encrypted, typed, browser-approved action proposals) |
 
 Bump the meta's major when sibling protocols break; bump siblings freely for normal features.
 

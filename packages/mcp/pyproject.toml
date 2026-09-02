@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-mcp"
-version = "0.2.9"
+version = "0.3.0"
 description = "MCP server for querying blood work data and knowledge base from getbased"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -12,6 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     # MCP 2 removed mcp.server.fastmcp; keep the v1 SDK until this adapter migrates.
     "mcp>=1.28.1,<2",
+    "pydantic>=2.0,<3",
     "httpx>=0.27",
     "cryptography>=50.0.0",
 ]

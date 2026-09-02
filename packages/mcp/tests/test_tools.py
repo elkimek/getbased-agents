@@ -23,6 +23,7 @@ from httpx import Response
 # ═══════════════════════════════════════════════════════════════════════
 
 GATEWAY_CONTEXT_URL = "https://gateway.test/api/context"
+GATEWAY_PROPOSALS_URL = "https://proposals.test/api/agent-proposals"
 LENS_URL_PREFIX = "http://lens.test:8322"
 
 
@@ -65,6 +66,225 @@ def _encrypted_context_payload(gm, context: str, profile_id: str = "abc", *, ver
         "profileId": profile_id,
         "context": json.dumps({"encryptedContext": envelope}),
     }
+
+
+@pytest.mark.asyncio
+async def test_getbased_propose_action_advertises_exact_mcp_schema(gm) -> None:
+    tools = await gm.mcp.list_tools()
+    tool = next(candidate for candidate in tools if candidate.name == "getbased_propose_action")
+    schema = tool.inputSchema
+    properties = schema["properties"]
+
+    assert properties["action_id"].get("const") == "sun.session.log" \
+        or properties["action_id"].get("enum") == ["sun.session.log"]
+    argument_schema = properties["arguments"]
+    if "$ref" in argument_schema:
+        argument_schema = schema["$defs"][argument_schema["$ref"].rsplit("/", 1)[-1]]
+    assert argument_schema["additionalProperties"] is False
+    assert argument_schema["required"] == ["durationMinutes"]
+    assert argument_schema["properties"]["notes"]["maxLength"] == 500
+    assert properties["expires_in_minutes"]["minimum"] == 5
+    assert properties["expires_in_minutes"]["maximum"] == 60
+
+
+@pytest.mark.parametrize("duration", ["60", True])
+def test_sun_session_arguments_reject_non_numeric_json_types(gm, duration) -> None:
+    with pytest.raises(Exception):
+        gm.SunSessionLogArguments.model_validate({"durationMinutes": duration})
+
+
+def test_sun_session_arguments_require_timezone_aware_ended_at(gm) -> None:
+    with pytest.raises(Exception):
+        gm.SunSessionLogArguments.model_validate({
+            "durationMinutes": 60,
+            "endedAt": "2026-09-01T10:30:00",
+        })
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_proposal_expiry_rejects_string_coercion_at_mcp_boundary(gm) -> None:
+    route = respx.post(GATEWAY_PROPOSALS_URL).mock(
+        return_value=Response(201, json={"ok": True, "proposalId": "unused"}),
+    )
+    with pytest.raises(Exception):
+        await gm.mcp.call_tool("getbased_propose_action", {
+            "action_id": "sun.session.log",
+            "arguments": {"durationMinutes": 60},
+            "profile": "abc",
+            "expires_in_minutes": "5",
+        })
+    assert route.call_count == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_propose_action_validation_errors_do_not_echo_notes(gm) -> None:
+    route = respx.post(GATEWAY_PROPOSALS_URL).mock(
+        return_value=Response(201, json={"ok": True, "proposalId": "unused"}),
+    )
+    sentinel = "PRIVATE_NOTE_SENTINEL_" + ("x" * 600)
+
+    result = await gm.mcp.call_tool("getbased_propose_action", {
+        "action_id": "sun.session.log",
+        "arguments": {"durationMinutes": 60, "notes": sentinel},
+        "profile": "abc",
+    })
+
+    rendered = str(result)
+    assert "Error: notes must be text with at most 500 characters" in rendered
+    assert "PRIVATE_NOTE_SENTINEL" not in rendered
+    assert route.call_count == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_propose_action_sends_ciphertext_only_and_waits_for_approval(gm) -> None:
+    def accept(request):
+        proposal_id = json.loads(request.content)["envelope"]["proposalId"]
+        return Response(201, json={
+            "ok": True,
+            "proposalId": proposal_id,
+            "duplicate": False,
+        })
+
+    route = respx.post(GATEWAY_PROPOSALS_URL).mock(side_effect=accept)
+
+    out = await gm.getbased_propose_action(
+        action_id="sun.session.log",
+        arguments={
+            "durationMinutes": 60,
+            "endedAt": "2026-09-01T10:30:00.000Z",
+            "notes": "Sunbathing",
+        },
+        profile="abc",
+        expires_in_minutes=30,
+    )
+
+    assert "waiting for explicit approval" in out
+    assert "saved" not in out.lower()
+    assert route.called
+    request_body = json.loads(route.calls[0].request.content)
+    assert set(request_body) == {"envelope"}
+    envelope = request_body["envelope"]
+    assert set(envelope) == {
+        "version", "alg", "keyDerivation", "keyId", "proposalId", "iv", "ciphertext",
+    }
+    serialized = json.dumps(request_body)
+    assert "Sunbathing" not in serialized
+    assert "durationMinutes" not in serialized
+    assert "abc" not in serialized
+
+    raw_key = gm._decode_agent_context_key(gm.AGENT_CONTEXT_KEY)
+    aad = gm.AGENT_PROPOSAL_AAD_PREFIX + b":" + envelope["proposalId"].encode("utf-8")
+    plaintext = AESGCM(raw_key).decrypt(
+        __import__("base64").b64decode(envelope["iv"]),
+        __import__("base64").b64decode(envelope["ciphertext"]),
+        aad,
+    )
+    proposal = json.loads(plaintext)["proposal"]
+    assert envelope["proposalId"] == gm._proposal_id_from_iv(
+        __import__("base64").b64decode(envelope["iv"]),
+    )
+    assert proposal["id"] == envelope["proposalId"]
+    assert proposal["actionId"] == "sun.session.log"
+    assert proposal["arguments"]["durationMinutes"] == 60
+    assert proposal["arguments"]["notes"] == "Sunbathing"
+    assert proposal["profileId"] == "abc"
+    assert proposal["capability"] == "sun.sessions:write:propose"
+    assert proposal["source"] == {"type": "external-agent", "client": "getbased-mcp"}
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_propose_action_rejects_unknown_actions_and_invalid_arguments(gm) -> None:
+    route = respx.post(GATEWAY_PROPOSALS_URL).mock(return_value=Response(201, json={"ok": True}))
+
+    unknown = await gm.getbased_propose_action(
+        action_id="profile.raw.patch",
+        arguments={"durationMinutes": 60},
+        profile="abc",
+    )
+    invalid = await gm.getbased_propose_action(
+        action_id="sun.session.log",
+        arguments={"durationMinutes": 0, "digestion": "worse"},
+        profile="abc",
+    )
+
+    assert "not an allowed proposal action" in unknown
+    assert "durationMinutes" in invalid
+    assert route.call_count == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_propose_action_surfaces_gateway_refusal_without_claiming_success(gm) -> None:
+    respx.post(GATEWAY_PROPOSALS_URL).mock(
+        return_value=Response(409, json={"error": "proposal_limit_exceeded"}),
+    )
+
+    out = await gm.getbased_propose_action(
+        action_id="sun.session.log",
+        arguments={"durationMinutes": 60},
+        profile="abc",
+    )
+
+    assert out == "Error: proposal relay refused the request (409: proposal_limit_exceeded)"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_propose_action_rejects_false_success_body(gm) -> None:
+    respx.post(GATEWAY_PROPOSALS_URL).mock(
+        return_value=Response(200, json={"ok": False, "error": "proposal_disabled"}),
+    )
+
+    out = await gm.getbased_propose_action(
+        action_id="sun.session.log",
+        arguments={"durationMinutes": 60},
+        profile="abc",
+    )
+
+    assert out == "Error: proposal relay returned an invalid acceptance response"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_propose_action_rejects_mismatched_proposal_id(gm) -> None:
+    respx.post(GATEWAY_PROPOSALS_URL).mock(
+        return_value=Response(201, json={"ok": True, "proposalId": "proposal_wrong"}),
+    )
+
+    out = await gm.getbased_propose_action(
+        action_id="sun.session.log",
+        arguments={"durationMinutes": 60},
+        profile="abc",
+    )
+
+    assert out == "Error: proposal relay returned an invalid acceptance response"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_getbased_propose_action_normalizes_gateway_base_with_api_suffix(
+    gm,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gm, "AGENT_PROPOSAL_GATEWAY", "https://proposals.test/api")
+
+    def accept(request):
+        proposal_id = json.loads(request.content)["envelope"]["proposalId"]
+        return Response(201, json={"ok": True, "proposalId": proposal_id})
+
+    route = respx.post(GATEWAY_PROPOSALS_URL).mock(side_effect=accept)
+    out = await gm.getbased_propose_action(
+        action_id="sun.session.log",
+        arguments={"durationMinutes": 60},
+        profile="abc",
+    )
+
+    assert route.called
+    assert "waiting for explicit approval" in out
 
 
 @pytest.mark.asyncio
