@@ -47,6 +47,10 @@ The setup payload contains private credentials. Do not paste it into public logs
 
 Manual install (macOS, Windows, WSL1, or if you'd rather not run a shell script):
 
+The full stack requires the [RAG native wheels](packages/rag/README.md#install),
+including macOS 14+ on Apple Silicon for ONNX. Choose the standalone MCP
+or dashboard package when native RAG dependencies are unavailable.
+
 ```bash
 # pipx — --include-deps exposes lens, getbased-dashboard, getbased-mcp on PATH
 pipx install --python python3.12 --include-deps "getbased-agent-stack[full]"
