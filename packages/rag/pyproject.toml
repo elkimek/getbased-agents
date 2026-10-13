@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=83.0.0", "wheel"]
+requires = ["setuptools>=84.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,15 +10,15 @@ readme = "README.md"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
-    "qdrant-client>=1.9",
-    "sentence-transformers>=5.6.0",
-    "typer>=0.12",
+    "fastapi>=0.143.0",
+    "uvicorn[standard]>=0.54.0",
+    "qdrant-client>=1.19.1",
+    "sentence-transformers>=6.1.0",
+    "typer>=0.27.3",
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "rich>=13.0",
-    "python-multipart>=0.0.31",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]
@@ -40,9 +40,9 @@ full = [
     "python-docx>=1.0",
     "onnxruntime>=1.17",
     "huggingface-hub>=0.20",
-    "tokenizers>=0.15",
+    "tokenizers>=0.23.3",
 ]
-test = ["pytest>=8.0", "httpx>=0.27"]
+test = ["pytest>=9.1.1", "httpx>=0.27"]
 
 [project.scripts]
 lens = "lens.cli:app"
