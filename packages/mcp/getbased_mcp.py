@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, WithJsonSchema, field_validator
 
 
@@ -69,7 +70,21 @@ _maybe_load_user_env()
 
 log = logging.getLogger("getbased_mcp")
 
-mcp = FastMCP("getbased")
+class _ProposalSafeFastMCP(FastMCP):
+    async def call_tool(self, name: str, arguments: dict):
+        # FastMCP validates the entire call before our tool body runs.
+        # Its default ToolError can echo rejected input, including notes
+        # inside a malformed or incomplete proposal request. Sanitize at
+        # the public call boundary, retaining normal errors for other tools.
+        try:
+            return await super().call_tool(name, arguments)
+        except ToolError:
+            if name != "getbased_propose_action":
+                raise
+            raise ToolError("Invalid proposal request") from None
+
+
+mcp = _ProposalSafeFastMCP("getbased")
 
 # ── Config ───────────────────────────────────────────────────────────
 TOKEN = os.environ.get("GETBASED_TOKEN", "")
@@ -258,7 +273,7 @@ def _gateway_api_url(gateway: str, route: str) -> str:
 
 def _validate_proposal_arguments(action_id: str, arguments: object) -> tuple[dict | None, str]:
     if action_id != "sun.session.log":
-        return None, f"{action_id or '(empty)'} is not an allowed proposal action"
+        return None, "action_id is not an allowed proposal action"
     if isinstance(arguments, SunSessionLogArguments):
         arguments = arguments.model_dump(by_alias=True, exclude_none=True, mode="json")
     if not isinstance(arguments, dict):
@@ -269,7 +284,7 @@ def _validate_proposal_arguments(action_id: str, arguments: object) -> tuple[dic
         return None, "durationMinutes must be greater than 0 and at most 1440"
     unknown = sorted(set(arguments) - allowed)
     if unknown:
-        return None, f"Unknown field: {unknown[0]}"
+        return None, "arguments contains unsupported fields"
     normalized: dict[str, object] = {"durationMinutes": duration}
     if "endedAt" in arguments:
         ended_at = arguments["endedAt"]
@@ -609,7 +624,8 @@ async def getbased_propose_action(
             )
         if response.status_code not in (200, 201):
             try:
-                error = response.json().get("error", "request_rejected")
+                error_body = response.json()
+                error = error_body.get("error", "request_rejected") if isinstance(error_body, dict) else "request_rejected"
             except (json.JSONDecodeError, ValueError):
                 error = "request_rejected"
             safe_error = error if isinstance(error, str) and re.fullmatch(r"[a-z0-9_:-]{1,80}", error) else "request_rejected"

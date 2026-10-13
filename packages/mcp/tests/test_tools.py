@@ -823,3 +823,55 @@ def test_activity_telemetry_failure_doesnt_break_tool(gm, tmp_path, monkeypatch)
     monkeypatch.setattr("builtins.open", bad_open)
     # Should not raise
     gm._append_activity("t", 5, True, "")
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("malformation", [
+    "string_arguments", "array_arguments", "null_arguments", "missing_action",
+    "invalid_action", "invalid_profile", "invalid_expiry", "unknown_argument",
+])
+async def test_proposal_malformed_call_does_not_echo_private_input(gm, caplog, malformation) -> None:
+    sentinel = "SYNTHETIC_PRIVATE_NOTE_REVIEW"
+    payload = {
+        "action_id": "sun.session.log",
+        "arguments": {"durationMinutes": 60, "notes": sentinel},
+        "profile": "abc",
+    }
+    if malformation == "string_arguments":
+        payload["arguments"] = sentinel
+    elif malformation == "array_arguments":
+        payload["arguments"] = [sentinel]
+    elif malformation == "null_arguments":
+        payload["arguments"] = None
+    elif malformation == "missing_action":
+        del payload["action_id"]
+    elif malformation == "invalid_action":
+        payload["action_id"] = sentinel
+    elif malformation == "invalid_profile":
+        payload["profile"] = sentinel + " has spaces"
+    elif malformation == "invalid_expiry":
+        payload["expires_in_minutes"] = sentinel
+    else:
+        payload["arguments"][sentinel] = True
+    route = respx.post(GATEWAY_PROPOSALS_URL).mock(return_value=Response(201, json={"ok": True}))
+    try:
+        result = await gm.mcp.call_tool("getbased_propose_action", payload)
+        rendered = str(result)
+    except Exception as error:
+        rendered = str(error)
+    assert sentinel not in rendered
+    assert sentinel not in caplog.text
+    assert "invalid" in rendered.lower() or "unsupported" in rendered.lower()
+    assert route.call_count == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("error_body", [[], None, "synthetic-private-error", 42])
+async def test_proposal_non_object_relay_error_is_sanitized(gm, error_body) -> None:
+    respx.post(GATEWAY_PROPOSALS_URL).mock(return_value=Response(409, json=error_body))
+    out = await gm.getbased_propose_action(
+        action_id="sun.session.log", arguments={"durationMinutes": 60}, profile="abc",
+    )
+    assert out == "Error: proposal relay refused the request (409: request_rejected)"
