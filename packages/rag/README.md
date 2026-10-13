@@ -13,10 +13,18 @@ A standalone local knowledge server for getbased. Point the getbased PWA's **Ext
 
 ## Install
 
-Requires Python ≥ 3.10.
+Requires Python ≥ 3.11. The full installation uses ONNX Runtime ≥ 1.31.
+For an existing Python 3.10 tool environment, follow the
+[migration instructions](../../README.md#migrating-an-existing-python-310-installation).
+
+ONNX Runtime 1.31 provides wheels for CPython 3.11–3.14 on Linux
+(glibc 2.28+, x86-64 or ARM64), Windows (x86-64 or ARM64), and
+macOS 14+ on Apple Silicon. The standard full installation is unavailable
+on Intel Macs; standalone MCP and dashboard installations do not require
+the native RAG dependencies.
 
 ```bash
-pipx install "getbased-rag[full]"
+pipx install --python python3.12 "getbased-rag[full]"
 ```
 
 Or from source:

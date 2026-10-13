@@ -5,7 +5,6 @@
 ```bash
 git clone https://github.com/elkimek/getbased-agents
 cd getbased-agents/packages/mcp
-cd getbased-mcp
 uv sync --extra test
 uv run pytest
 ```
@@ -27,7 +26,7 @@ Every new tool should get:
 
 1. Bump `version` in `pyproject.toml`
 2. Update the README tool table if tools changed
-3. Open a PR — CI runs tests on Python 3.10/3.11/3.12
+3. Open a PR — CI runs tests on Python 3.11/3.12/3.13/3.14
 4. Merge, then:
    ```bash
    git tag -a v0.X.0 -m "v0.X.0 — summary"

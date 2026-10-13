@@ -6,6 +6,10 @@ Part of the [getbased-agents monorepo](https://github.com/elkimek/getbased-agent
 
 ## Install
 
+Requires Python 3.11 or newer. To rebuild an existing Python 3.10 tool
+environment while preserving configuration and library data, follow the
+[migration instructions](../../README.md#migrating-an-existing-python-310-installation).
+
 Linux, one command:
 
 ```bash
@@ -25,7 +29,7 @@ That setup payload contains private credentials. Keep it out of logs and public 
 Manual — pipx:
 
 ```bash
-pipx install --include-deps "getbased-agent-stack[full]"
+pipx install --python python3.12 --include-deps "getbased-agent-stack[full]"
 ```
 
 The `--include-deps` flag is required — it exposes `getbased-mcp`, `lens`, and `getbased-dashboard` alongside `getbased-stack` on your PATH. Without it, pipx only links the stack's own entry point and the MCP/rag/dashboard binaries stay hidden inside the venv.
@@ -34,6 +38,7 @@ Manual — uv (0.11+):
 
 ```bash
 uv tool install \
+  --python 3.12 \
   --with-executables-from getbased-rag \
   --with-executables-from getbased-dashboard \
   --with-executables-from getbased-mcp \

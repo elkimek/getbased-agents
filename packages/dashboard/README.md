@@ -31,8 +31,10 @@ Three tabs, one auth gate, and a bottom-right ingest progress pill that survives
 
 ## Install and run
 
+Requires Python 3.11 or newer. See the [Python 3.10 migration instructions](../../README.md#migrating-an-existing-python-310-installation) for existing tool environments.
+
 ```bash
-pipx install getbased-dashboard
+pipx install --python python3.12 getbased-dashboard
 getbased-dashboard serve          # http://127.0.0.1:8323
 ```
 
@@ -41,7 +43,7 @@ The dashboard expects a [getbased-rag](https://github.com/elkimek/getbased-agent
 Or as part of the full stack:
 
 ```bash
-pipx install "getbased-agent-stack[full]"
+pipx install --python python3.12 "getbased-agent-stack[full]"
 lens serve                       # in one terminal — the local knowledge server
 getbased-dashboard serve         # in another — the UI
 ```

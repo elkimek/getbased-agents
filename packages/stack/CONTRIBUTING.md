@@ -12,7 +12,6 @@ If the bug is in a tool definition or an HTTP endpoint, contribute there. This r
 ```bash
 git clone https://github.com/elkimek/getbased-agents
 cd getbased-agents/packages/stack
-cd getbased-agent-stack
 uv sync --extra test --extra full
 uv run pytest
 ```

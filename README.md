@@ -25,6 +25,10 @@ context gateway   getbased-rag  ◄──────┘     getbased-mcp
 
 ## Install
 
+Requires Python 3.11 or newer. Python 3.10 reached end of life on
+October 1, 2026 and is no longer supported. The commands below select
+Python 3.12 explicitly for the native embedding dependencies.
+
 Linux public install:
 
 ```bash
@@ -43,12 +47,17 @@ The setup payload contains private credentials. Do not paste it into public logs
 
 Manual install (macOS, Windows, WSL1, or if you'd rather not run a shell script):
 
+The full stack requires the [RAG native wheels](packages/rag/README.md#install),
+including macOS 14+ on Apple Silicon for ONNX. Choose the standalone MCP
+or dashboard package when native RAG dependencies are unavailable.
+
 ```bash
 # pipx — --include-deps exposes lens, getbased-dashboard, getbased-mcp on PATH
-pipx install --include-deps "getbased-agent-stack[full]"
+pipx install --python python3.12 --include-deps "getbased-agent-stack[full]"
 
 # or uv (0.11+)
 uv tool install \
+  --python 3.12 \
   --with-executables-from getbased-rag \
   --with-executables-from getbased-dashboard \
   --with-executables-from getbased-mcp \
@@ -58,10 +67,54 @@ uv tool install \
 Or pick the piece you actually need:
 
 ```bash
-pipx install getbased-mcp            # agents for lab data only, no knowledge server (~10 MB)
-pipx install "getbased-rag[full]"    # local knowledge server for the PWA, no agents (~500 MB)
-pipx install getbased-dashboard      # web UI; pulls the MCP dep alongside it
+pipx install --python python3.12 getbased-mcp          # agent only
+pipx install --python python3.12 "getbased-rag[full]"  # knowledge server
+pipx install --python python3.12 getbased-dashboard    # dashboard + MCP
 ```
+
+### Migrating an existing Python 3.10 installation
+
+Install Python 3.12, then rebuild the tool environment with it. Existing
+configuration and knowledge-library data live outside the tool environment.
+Stop manually launched servers before rebuilding their environment.
+
+For a full stack installed with uv, repeat the install command above with
+`--reinstall --python 3.12`. For a standalone tool, repeat its original
+package/extras with the same flags; for example:
+
+```bash
+uv tool install --reinstall --python 3.12 getbased-mcp
+uv tool install --reinstall --python 3.12 "getbased-rag[full]"
+uv tool install --reinstall --python 3.12 getbased-dashboard
+```
+
+Run only the commands for tools you have installed. Keep the extras from
+your original install; the RAG example above is for a full installation.
+uv can download a compatible managed interpreter automatically.
+
+For pipx, install Python 3.12 first, then rebuild the matching environment.
+`reinstall` preserves the original package/extras and install options:
+
+```bash
+# Full stack environment:
+pipx reinstall --python python3.12 getbased-agent-stack
+
+# Standalone environments — run only the ones you have installed:
+pipx reinstall --python python3.12 getbased-mcp
+pipx reinstall --python python3.12 getbased-rag
+pipx reinstall --python python3.12 getbased-dashboard
+```
+
+For a systemd-managed full stack, restart its services after reinstalling:
+
+```bash
+getbased-stack install
+```
+
+For manually launched servers (including macOS, Windows, and WSL1), start
+`lens serve` and `getbased-dashboard serve` again in separate terminals.
+Start only the servers you use. MCP clients start their configured adapter
+on demand; restart the client connection to pick up its new environment.
 
 ## Quickstart
 
@@ -76,7 +129,7 @@ curl -fsSL https://getbased.health/install.sh | bash -s -- connect hermes --setu
 Manual setup:
 
 ```bash
-pipx install --include-deps "getbased-agent-stack[full]"
+pipx install --python python3.12 --include-deps "getbased-agent-stack[full]"
 getbased-stack init --yes --local-only     # creates the env file, API key, and systemd units where supported
 getbased-stack connect hermes --setup gbsetup_v1_...  # from getbased → Settings → Agent Access
 getbased-stack mcp-config claude-desktop   # paste the snippet into your MCP client
@@ -101,7 +154,7 @@ Each package runs its own tests from its own directory:
 (cd packages/stack && uv run --locked pytest)     # CLI/unit tests + real lens/MCP integration
 ```
 
-CI runs all four packages on Python 3.10/3.11/3.12 (unit) + 3.12 (integration) on every push and PR. Installs use the checked-in lockfile, and dependency audits include all optional extras on each supported Python version.
+CI runs all four packages on Python 3.11/3.12/3.13/3.14 (unit) + 3.12 (integration) on every push and PR. Installs use the checked-in lockfile, and dependency audits include all optional extras on each tested Python version.
 
 Per-package details:
 - [packages/mcp/README.md](packages/mcp/README.md) + [CONTRIBUTING](packages/mcp/CONTRIBUTING.md) + [SECURITY](packages/mcp/SECURITY.md)
