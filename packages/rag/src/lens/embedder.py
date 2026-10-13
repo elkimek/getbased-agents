@@ -542,7 +542,7 @@ class LocalEmbedder(Embedder):
         log.info("Loading embedding model: %s …", self._model_name)
         self._model = SentenceTransformer(self._model_name)
         self._model.eval()
-        self._dim = self._model.get_sentence_embedding_dimension()
+        self._dim = self._model.get_embedding_dimension()
         log.info("Model ready (dim=%d)", self._dim)
 
     # public API -------------------------------------------------------

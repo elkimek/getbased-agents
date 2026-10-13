@@ -6,14 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  # Fast unit tests for mcp + rag — no real embedder, no subprocesses.
+  # Cover every package on every supported Python version. Real-model
+  # integration runs separately below.
   unit:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
-        package: [mcp, rag]
+        package: [mcp, rag, dashboard, stack]
     steps:
       - uses: actions/checkout@v7
       - name: Install uv
@@ -25,8 +29,25 @@ jobs:
       - name: Install + run ${{ matrix.package }}
         working-directory: packages/${{ matrix.package }}
         run: |
-          uv sync --extra test
-          uv run pytest
+          uv sync --locked --python ${{ matrix.python-version }} --extra test
+          uv run --locked --python ${{ matrix.python-version }} pytest --ignore=tests/test_integration.py
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Audit the locked dependency graph, including optional extras
+        run: |
+          uv export --locked --all-packages --all-extras --no-emit-workspace --no-hashes --output-file requirements-audit.txt
+          uvx --python ${{ matrix.python-version }} pip-audit --no-deps --disable-pip --requirement requirements-audit.txt
 
   # End-to-end integration — real lens subprocess + real MCP tool calls.
   # Runs only on 3.12 because it's slower (MiniLM first-run download).
@@ -48,8 +69,8 @@ jobs:
           key: hf-${{ runner.os }}-MiniLM-L6-v2
       - name: Install stack with full extras
         working-directory: packages/stack
-        run: uv sync --extra test --extra full
+        run: uv sync --locked --python 3.12 --extra test --extra full
       - name: Run integration tests
         working-directory: packages/stack
-        run: uv run pytest -v
+        run: uv run --locked --python 3.12 pytest -v
         timeout-minutes: 10

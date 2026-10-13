@@ -9,6 +9,7 @@ without `getbased-stack init` clobbering their comments.
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -82,8 +83,20 @@ def write_env_file(
         if not k or not all(c.isalnum() or c == "_" for c in k):
             raise ValueError(f"invalid env key: {k!r}")
         lines.append(f"{k}={v}\n")
-    p.write_text("".join(lines), encoding="utf-8")
-    os.chmod(p, 0o600)
+    # mkstemp creates an exclusive, private file before any secrets are
+    # written. Replace atomically so readers never see a partial update,
+    # and a destination symlink cannot redirect the write to another file.
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{p.name}-", dir=p.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            os.chmod(temporary, 0o600)
+            stream.write("".join(lines))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, p)
+    finally:
+        temporary.unlink(missing_ok=True)
     return p
 
 

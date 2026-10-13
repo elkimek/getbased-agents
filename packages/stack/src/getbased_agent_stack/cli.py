@@ -42,8 +42,14 @@ def _ensure_api_key(path: Path) -> str:
         return path.read_text(encoding="utf-8").strip()
     path.parent.mkdir(parents=True, exist_ok=True)
     key = secrets.token_urlsafe(32)
-    path.write_text(key + "\n", encoding="utf-8")
-    os.chmod(path, 0o600)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # A concurrent initializer won; retain its key instead of rotating
+        # credentials behind the already-starting services.
+        return path.read_text(encoding="utf-8").strip()
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write(key + "\n")
     return key
 
 

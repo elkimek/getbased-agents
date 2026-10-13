@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=83.0.0", "wheel"]
+requires = ["setuptools>=84.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,14 +11,14 @@ license = "AGPL-3.0-or-later"
 requires-python = ">=3.10"
 dependencies = [
     # MCP 2 removed mcp.server.fastmcp; keep the v1 SDK until this adapter migrates.
-    "mcp>=1.28.1,<2",
+    "mcp>=1.30.0,<2",
     "pydantic>=2.0,<3",
     "httpx>=0.27",
     "cryptography>=50.0.0",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-asyncio>=0.23", "respx>=0.21"]
+test = ["pytest>=9.1.1", "pytest-asyncio>=0.23", "respx>=0.21"]
 
 [project.scripts]
 getbased-mcp = "getbased_mcp:mcp.run"
