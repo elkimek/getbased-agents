@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
-    "qdrant-client>=1.9",
+    "qdrant-client>=1.19.1",
     "sentence-transformers>=5.6.0",
     "typer>=0.12",
     "pydantic>=2.0",
