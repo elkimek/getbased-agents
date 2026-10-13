@@ -1,31 +1,15 @@
 version: 2
 updates:
-  # Each workspace package has its own pyproject.toml — Dependabot
-  # tracks them independently so a bump in one package doesn't churn
-  # the others. Workspace root has no runtime deps (uv coordinator only).
-  - package-ecosystem: pip
-    directory: /packages/mcp
+  # uv manages all four packages and their shared lockfile at the root.
+  - package-ecosystem: uv
+    directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: pip
-    directory: /packages/rag
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: pip
-    directory: /packages/dashboard
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: pip
-    directory: /packages/stack
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
+    ignore:
+      # MCP 2 removed mcp.server.fastmcp. Keep v1 until the adapter migrates.
+      - dependency-name: mcp
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
