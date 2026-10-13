@@ -95,13 +95,13 @@ uv sync --all-packages --all-extras
 Each package runs its own tests from its own directory:
 
 ```bash
-(cd packages/mcp && uv run pytest)       # 33 unit tests, respx-mocked HTTP
-(cd packages/rag && uv run pytest)       # 51 tests, FastAPI TestClient + fake embedder
-(cd packages/dashboard && uv run pytest) # 64 tests, respx-mocked rag + real-subprocess MCP probe
-(cd packages/stack && uv run pytest)     # 2 integration tests: real lens subprocess + real MCP tool calls
+(cd packages/mcp && uv run --locked pytest)       # respx-mocked HTTP
+(cd packages/rag && uv run --locked pytest)       # FastAPI TestClient + fake embedder
+(cd packages/dashboard && uv run --locked pytest) # mocked rag + real-subprocess MCP probe
+(cd packages/stack && uv run --locked pytest)     # CLI/unit tests + real lens/MCP integration
 ```
 
-CI runs the same matrix on Python 3.10/3.11/3.12 (unit) + 3.12 (integration) on every push and PR.
+CI runs all four packages on Python 3.10/3.11/3.12 (unit) + 3.12 (integration) on every push and PR. Installs use the checked-in lockfile, and dependency audits include all optional extras on each supported Python version.
 
 Per-package details:
 - [packages/mcp/README.md](packages/mcp/README.md) + [CONTRIBUTING](packages/mcp/CONTRIBUTING.md) + [SECURITY](packages/mcp/SECURITY.md)

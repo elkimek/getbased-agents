@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 import os
 import socket
 import subprocess
@@ -152,6 +153,29 @@ def mcp_env(seeded_lens: dict, monkeypatch: pytest.MonkeyPatch):
 
 
 # ── Tests ────────────────────────────────────────────────────────────
+
+@pytest.mark.timeout(180)
+def test_local_embedder_dependency_round_trip() -> None:
+    """Validate the PyTorch fallback as well as the preferred ONNX backend.
+
+    The full-stack fixture uses ONNX, so it cannot catch incompatible
+    sentence-transformers / transformers upgrades on its own.
+    """
+    from lens.embedder import LocalEmbedder
+
+    embedder = LocalEmbedder("sentence-transformers/all-MiniLM-L6-v2")
+    vectors = embedder.encode([
+        "Synthetic dependency upgrade smoke test.",
+        "Another sentence for a batched embedding.",
+    ])
+
+    assert len(vectors) == 2
+    assert embedder.dimension() == 384
+    for vector in vectors:
+        assert len(vector) == 384
+        assert all(math.isfinite(value) for value in vector)
+        assert sum(value * value for value in vector) == pytest.approx(1, abs=1e-4)
+
 
 def test_pdf_ingest_dependency_round_trip(tmp_path: Path) -> None:
     """Exercise the optional PDF parser pinned by the full stack extra.
