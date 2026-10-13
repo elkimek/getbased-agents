@@ -63,30 +63,54 @@ uv tool install \
 Or pick the piece you actually need:
 
 ```bash
-pipx install getbased-mcp            # agents for lab data only, no knowledge server (~10 MB)
-pipx install "getbased-rag[full]"    # local knowledge server for the PWA, no agents (~500 MB)
-pipx install getbased-dashboard      # web UI; pulls the MCP dep alongside it
+pipx install --python python3.12 getbased-mcp          # agent only
+pipx install --python python3.12 "getbased-rag[full]"  # knowledge server
+pipx install --python python3.12 getbased-dashboard    # dashboard + MCP
 ```
 
 ### Migrating an existing Python 3.10 installation
 
 Install Python 3.12, then rebuild the tool environment with it. Existing
 configuration and knowledge-library data live outside the tool environment.
+Stop manually launched servers before rebuilding their environment.
 
-For uv, repeat the install command above with `--reinstall --python 3.12`.
-uv can download a compatible managed interpreter automatically.
-
-For pipx, install Python 3.12 first, then run:
+For a full stack installed with uv, repeat the install command above with
+`--reinstall --python 3.12`. For a standalone tool, repeat its original
+package/extras with the same flags; for example:
 
 ```bash
-pipx reinstall --python python3.12 getbased-agent-stack
+uv tool install --reinstall --python 3.12 getbased-mcp
+uv tool install --reinstall --python 3.12 "getbased-rag[full]"
+uv tool install --reinstall --python 3.12 getbased-dashboard
 ```
 
-Restart the running stack services after reinstalling:
+Run only the commands for tools you have installed. Keep the extras from
+your original install; the RAG example above is for a full installation.
+uv can download a compatible managed interpreter automatically.
+
+For pipx, install Python 3.12 first, then rebuild the matching environment.
+`reinstall` preserves the original package/extras and install options:
+
+```bash
+# Full stack environment:
+pipx reinstall --python python3.12 getbased-agent-stack
+
+# Standalone environments — run only the ones you have installed:
+pipx reinstall --python python3.12 getbased-mcp
+pipx reinstall --python python3.12 getbased-rag
+pipx reinstall --python python3.12 getbased-dashboard
+```
+
+For a systemd-managed full stack, restart its services after reinstalling:
 
 ```bash
 getbased-stack install
 ```
+
+For manually launched servers (including macOS, Windows, and WSL1), start
+`lens serve` and `getbased-dashboard serve` again in separate terminals.
+Start only the servers you use. MCP clients start their configured adapter
+on demand; restart the client connection to pick up its new environment.
 
 ## Quickstart
 
@@ -101,7 +125,7 @@ curl -fsSL https://getbased.health/install.sh | bash -s -- connect hermes --setu
 Manual setup:
 
 ```bash
-pipx install --include-deps "getbased-agent-stack[full]"
+pipx install --python python3.12 --include-deps "getbased-agent-stack[full]"
 getbased-stack init --yes --local-only     # creates the env file, API key, and systemd units where supported
 getbased-stack connect hermes --setup gbsetup_v1_...  # from getbased → Settings → Agent Access
 getbased-stack mcp-config claude-desktop   # paste the snippet into your MCP client
