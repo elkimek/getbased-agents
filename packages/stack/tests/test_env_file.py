@@ -62,6 +62,52 @@ def test_write_sets_mode_0600(tmp_env_path):
     assert mode == 0o600
 
 
+def test_write_publishes_private_complete_file(tmp_env_path, monkeypatch):
+    tmp_env_path.parent.mkdir(parents=True)
+    tmp_env_path.write_text("TOKEN=old\n")
+    replace = os.replace
+    published = []
+
+    def check_replace(source, destination):
+        source = Path(source)
+        assert stat.S_IMODE(source.stat().st_mode) == 0o600
+        assert source.read_text() == "TOKEN=synthetic-new\n"
+        assert tmp_env_path.read_text() == "TOKEN=old\n"
+        published.append(destination)
+        replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", check_replace)
+    env_file.write_env_file({"TOKEN": "synthetic-new"}, path=tmp_env_path, header="")
+    assert published == [tmp_env_path]
+    assert tmp_env_path.read_text() == "TOKEN=synthetic-new\n"
+
+
+def test_write_failure_preserves_previous_file_and_cleans_temporary(tmp_env_path, monkeypatch):
+    tmp_env_path.parent.mkdir(parents=True)
+    tmp_env_path.write_text("TOKEN=old\n")
+
+    def fail_replace(source, destination):
+        raise OSError("synthetic replacement failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(OSError, match="synthetic replacement failure"):
+        env_file.write_env_file({"TOKEN": "synthetic-new"}, path=tmp_env_path)
+    assert tmp_env_path.read_text() == "TOKEN=old\n"
+    assert list(tmp_env_path.parent.iterdir()) == [tmp_env_path]
+
+
+def test_write_does_not_follow_destination_symlink(tmp_env_path, tmp_path):
+    target = tmp_path / "unrelated"
+    target.write_text("retain this content")
+    tmp_env_path.parent.mkdir(parents=True)
+    tmp_env_path.symlink_to(target)
+
+    env_file.write_env_file({"TOKEN": "synthetic-new"}, path=tmp_env_path, header="")
+    assert target.read_text() == "retain this content"
+    assert not tmp_env_path.is_symlink()
+    assert tmp_env_path.read_text() == "TOKEN=synthetic-new\n"
+
+
 def test_write_rejects_invalid_keys(tmp_env_path):
     with pytest.raises(ValueError, match="invalid env key"):
         env_file.write_env_file({"has space": "x"}, path=tmp_env_path)

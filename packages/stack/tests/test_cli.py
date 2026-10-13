@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -63,6 +64,37 @@ def _run(argv: "list[str]") -> "tuple[int, str, str]":
 
 
 # ── help / version ────────────────────────────────────────────────────
+
+
+def test_api_key_is_private_before_first_write(tmp_path, monkeypatch):
+    path = tmp_path / "key"
+    fdopen = os.fdopen
+    modes = []
+
+    def check_fdopen(fd, *args, **kwargs):
+        modes.append(stat.S_IMODE(os.fstat(fd).st_mode))
+        return fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(os, "fdopen", check_fdopen)
+    previous_umask = os.umask(0)
+    try:
+        key = cli._ensure_api_key(path)
+    finally:
+        os.umask(previous_umask)
+    assert modes == [0o600]
+    assert path.read_text().strip() == key
+
+
+def test_api_key_preserves_concurrent_initializer_key(tmp_path, monkeypatch):
+    path = tmp_path / "key"
+
+    def concurrent_initializer(size):
+        path.write_text("synthetic-winning-key\n")
+        return "synthetic-losing-key"
+
+    monkeypatch.setattr(cli.secrets, "token_urlsafe", concurrent_initializer)
+    assert cli._ensure_api_key(path) == "synthetic-winning-key"
+    assert path.read_text() == "synthetic-winning-key\n"
 
 
 def test_bare_invocation_shows_help():
