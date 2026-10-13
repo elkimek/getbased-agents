@@ -2,6 +2,8 @@
 
 An [MCP](https://modelcontextprotocol.io) server that exposes getbased health context and an optional local knowledge base as tools. Works with MCP-compatible clients such as Claude Code, Claude Desktop, Cursor, Cline, Codex CLI, Hermes, and OpenClaw.
 
+Requires Python 3.11 or newer. See the [Python 3.10 migration instructions](../../README.md#migrating-an-existing-python-310-installation) for existing tool environments.
+
 > **Installing for the first time?** Use the private setup command from **getbased → Settings → Agent Access**. It installs or updates [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack), stores the token/key locally, and configures the selected client.
 
 ## How it works

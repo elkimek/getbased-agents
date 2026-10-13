@@ -31,6 +31,8 @@ Three tabs, one auth gate, and a bottom-right ingest progress pill that survives
 
 ## Install and run
 
+Requires Python 3.11 or newer. See the [Python 3.10 migration instructions](../../README.md#migrating-an-existing-python-310-installation) for existing tool environments.
+
 ```bash
 pipx install getbased-dashboard
 getbased-dashboard serve          # http://127.0.0.1:8323

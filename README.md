@@ -25,6 +25,10 @@ context gateway   getbased-rag  ◄──────┘     getbased-mcp
 
 ## Install
 
+Requires Python 3.11 or newer. Python 3.10 reached end of life on
+October 1, 2026 and is no longer supported. The commands below select
+Python 3.12 explicitly for the native embedding dependencies.
+
 Linux public install:
 
 ```bash
@@ -45,10 +49,11 @@ Manual install (macOS, Windows, WSL1, or if you'd rather not run a shell script)
 
 ```bash
 # pipx — --include-deps exposes lens, getbased-dashboard, getbased-mcp on PATH
-pipx install --include-deps "getbased-agent-stack[full]"
+pipx install --python python3.12 --include-deps "getbased-agent-stack[full]"
 
 # or uv (0.11+)
 uv tool install \
+  --python 3.12 \
   --with-executables-from getbased-rag \
   --with-executables-from getbased-dashboard \
   --with-executables-from getbased-mcp \
@@ -61,6 +66,26 @@ Or pick the piece you actually need:
 pipx install getbased-mcp            # agents for lab data only, no knowledge server (~10 MB)
 pipx install "getbased-rag[full]"    # local knowledge server for the PWA, no agents (~500 MB)
 pipx install getbased-dashboard      # web UI; pulls the MCP dep alongside it
+```
+
+### Migrating an existing Python 3.10 installation
+
+Install Python 3.12, then rebuild the tool environment with it. Existing
+configuration and knowledge-library data live outside the tool environment.
+
+For uv, repeat the install command above with `--reinstall --python 3.12`.
+uv can download a compatible managed interpreter automatically.
+
+For pipx, install Python 3.12 first, then run:
+
+```bash
+pipx reinstall --python python3.12 getbased-agent-stack
+```
+
+Restart the running stack services after reinstalling:
+
+```bash
+getbased-stack install
 ```
 
 ## Quickstart
@@ -101,7 +126,7 @@ Each package runs its own tests from its own directory:
 (cd packages/stack && uv run --locked pytest)     # CLI/unit tests + real lens/MCP integration
 ```
 
-CI runs all four packages on Python 3.10/3.11/3.12 (unit) + 3.12 (integration) on every push and PR. Installs use the checked-in lockfile, and dependency audits include all optional extras on each supported Python version.
+CI runs all four packages on Python 3.11/3.12/3.13/3.14 (unit) + 3.12 (integration) on every push and PR. Installs use the checked-in lockfile, and dependency audits include all optional extras on each tested Python version.
 
 Per-package details:
 - [packages/mcp/README.md](packages/mcp/README.md) + [CONTRIBUTING](packages/mcp/CONTRIBUTING.md) + [SECURITY](packages/mcp/SECURITY.md)

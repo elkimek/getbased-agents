@@ -177,6 +177,24 @@ def test_local_embedder_dependency_round_trip() -> None:
         assert sum(value * value for value in vector) == pytest.approx(1, abs=1e-4)
 
 
+@pytest.mark.timeout(180)
+def test_onnx_embedder_batch_matches_individual_encodings() -> None:
+    """Native runtime upgrades must preserve unequal-length batch padding."""
+    from lens.embedder import OnnxEmbedder
+
+    embedder = OnnxEmbedder("sentence-transformers/all-MiniLM-L6-v2", provider="cpu")
+    texts = ["A short synthetic sentence.", "A longer synthetic sentence exercises padded embedding batches."]
+    batch = embedder.encode(texts)
+
+    assert len(batch) == len(texts)
+    assert embedder.dimension() == 384
+    for text, vector in zip(texts, batch):
+        assert len(vector) == 384
+        assert all(math.isfinite(value) for value in vector)
+        assert sum(value * value for value in vector) == pytest.approx(1, abs=1e-4)
+        assert vector == pytest.approx(embedder.encode([text])[0], abs=1e-5)
+
+
 def test_pdf_ingest_dependency_round_trip(tmp_path: Path) -> None:
     """Exercise the optional PDF parser pinned by the full stack extra.
 

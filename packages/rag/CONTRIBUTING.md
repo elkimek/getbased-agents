@@ -5,7 +5,6 @@
 ```bash
 git clone https://github.com/elkimek/getbased-agents
 cd getbased-agents/packages/rag
-cd getbased-rag
 uv sync --extra test --extra full
 uv run pytest
 ```
@@ -24,7 +23,7 @@ uv run pytest
 - `/libraries` full CRUD lifecycle + isolation
 - 404 paths
 
-Runs in ~2 s on CI across Python 3.10/3.11/3.12.
+Runs in ~2 s on CI across Python 3.11/3.12/3.13/3.14.
 
 The cross-repo integration test (real `lens serve` subprocess + MCP tool calls against it) lives in the [getbased-agent-stack](https://github.com/elkimek/getbased-agents/tree/main/packages/stack) meta-package.
 
@@ -41,7 +40,7 @@ Every new HTTP endpoint should get a unit test covering the happy path, the auth
 
 1. Bump `version` in `pyproject.toml`
 2. Update the HTTP API table in the README if endpoints changed
-3. Open a PR — CI runs tests on Python 3.10/3.11/3.12
+3. Open a PR — CI runs tests on Python 3.11/3.12/3.13/3.14
 4. Merge, then:
    ```bash
    git tag -a v0.X.0 -m "v0.X.0 — summary"
