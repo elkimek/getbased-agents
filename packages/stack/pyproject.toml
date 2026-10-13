@@ -22,7 +22,7 @@ dependencies = [
 # weights — no PyTorch/transformers/optimum dance).
 full = ["getbased-rag[full]>=0.7.5"]
 # For contributors running the integration test harness.
-test = ["pytest>=8.0", "httpx>=0.27", "pytest-timeout>=2.3"]
+test = ["pytest>=9.1.1", "httpx>=0.27", "pytest-timeout>=2.3"]
 
 # In the monorepo (elkimek/getbased-agents), the workspace-root pyproject
 # overrides these with `workspace = true` sources. From PyPI, the
