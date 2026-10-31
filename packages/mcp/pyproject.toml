@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=9.1.1", "pytest-asyncio>=0.23", "respx>=0.21"]
+test = ["pytest>=9.1.1", "pytest-asyncio>=1.4.1", "respx>=0.21"]
 
 [project.scripts]
 getbased-mcp = "getbased_mcp:mcp.run"
