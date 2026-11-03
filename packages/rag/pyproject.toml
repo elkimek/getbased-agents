@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-rag"
-version = "0.8.0"
+version = "0.8.1"
 description = "getbased-rag — standalone RAG knowledge server (formerly the Electron-bundled Lens)"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -19,6 +19,11 @@ dependencies = [
     "pyyaml>=6.0",
     "rich>=13.0",
     "python-multipart>=0.0.32",
+    # Security floors for transitive dependencies also apply to PyPI installs,
+    # which do not consume this workspace's uv.lock.
+    "certifi>=2026.10.18",
+    "filelock>=4.2.7",
+    "setuptools>=84.2.1",
 ]
 
 [project.optional-dependencies]

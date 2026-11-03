@@ -30,6 +30,9 @@ the release trigger.
    any sibling minimum-version constraints in
    `packages/stack/pyproject.toml` if they changed.
 
+   For security fixes, update the published dependency minimums as well
+   as `uv.lock`. PyPI consumers do not use the workspace lockfile.
+
 2. **Commit the bump** and push to `main` (tests will run on PR or
    direct push via `.github/workflows/test.yml`).
 
@@ -38,7 +41,9 @@ the release trigger.
    git push origin main
    ```
 
-3. **Tag and push the tag.** The workflow matches `v*` and `*-v*` so
+3. **Wait for tests, integration, dependency audits, and CodeQL to pass
+   on the release commit**, then tag that exact commit and push the tag.
+   The workflow matches `v*` and `*-v*` so
    either scheme works:
 
    ```bash
@@ -53,6 +58,11 @@ the release trigger.
    per-project dist dirs and runs four upload steps. Any package whose
    version already exists on PyPI hits `skip-existing` and is a no-op;
    any newly-bumped package lands a wheel.
+
+   Uploads run in dependency order: MCP and RAG first, dashboard next,
+   then the stack meta-package. Confirm all four expected versions are
+   available on PyPI and smoke-test a fresh full-stack installation before
+   marking the release complete.
 
 That's it. No manual `twine upload`, no tokens in your shell, no
 `.pypirc` to keep in sync.
