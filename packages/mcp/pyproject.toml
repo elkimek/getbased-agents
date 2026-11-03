@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=84.0.0", "wheel"]
+requires = ["setuptools>=84.2.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "getbased-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server for querying blood work data and knowledge base from getbased"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -13,11 +13,13 @@ dependencies = [
     # MCP 2 removed mcp.server.fastmcp; keep the v1 SDK until this adapter migrates.
     "mcp>=1.30.0,<2",
     "httpx>=0.27",
-    "cryptography>=50.0.0",
+    "cryptography>=50.0.2",
+    # Keep HTTP certificate trust data above the known vulnerable releases.
+    "certifi>=2026.10.18",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=9.1.1", "pytest-asyncio>=0.23", "respx>=0.21"]
+test = ["pytest>=9.2.0", "pytest-asyncio>=1.4.1", "respx>=0.21"]
 
 [project.scripts]
 getbased-mcp = "getbased_mcp:mcp.run"
@@ -30,3 +32,4 @@ py-modules = ["getbased_mcp"]
 testpaths = ["tests"]
 addopts = "-ra -q"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
