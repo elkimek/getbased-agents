@@ -22,7 +22,7 @@ dependencies = [
     # Security floors for transitive dependencies also apply to PyPI installs,
     # which do not consume this workspace's uv.lock.
     "certifi>=2026.10.18",
-    "filelock>=4.2.7",
+    "filelock>=4.2.9",
     "setuptools>=84.2.1",
 ]
 
